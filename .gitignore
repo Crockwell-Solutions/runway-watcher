@@ -1,16 +1,20 @@
-*.js
-!jest.config.js
-*.d.ts
+# Dependencies
 node_modules
+
+# Build output
 dist
 dist-ssr
+cdk.out
+.cdk.staging
+
+# CDK compiled output
+infrastructure/**/*.js
+infrastructure/**/*.d.ts
+!infrastructure/jest.config.js
+
+# Environment
 *.local
 .env
-cdk.out
-
-# CDK asset staging directory
-.cdk.staging
-cdk.out
 
 # Editor directories and files
 .vscode/*

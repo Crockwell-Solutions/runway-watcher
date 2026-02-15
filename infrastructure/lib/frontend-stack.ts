@@ -59,10 +59,10 @@ export class FrontendStack extends Stack {
         Source.asset(frontendPath, {
           bundling: {
             image: cdk.DockerImage.fromRegistry('node:22'),
-            command: ['bash', '-c', 'npm ci && npm run build && rm -f dist/config.js && cp -r dist/* /asset-output/'],
+            command: ['bash', '-c', 'npm install && npm run build && rm -f dist/config.js && cp -r dist/* /asset-output/'],
             local: {
               tryBundle(outputDir: string): boolean {
-                execSync('npm ci && npm run build', {
+                execSync('npm run build', {
                   cwd: frontendPath,
                   stdio: 'inherit',
                 });

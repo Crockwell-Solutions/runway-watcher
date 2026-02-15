@@ -1,0 +1,10 @@
+{
+  "name": "@runway-watcher/backend",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"No tests yet\""
+  },
+  "devDependencies": {}
+}

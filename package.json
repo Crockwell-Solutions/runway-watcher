@@ -1,0 +1,20 @@
+{
+  "name": "runway-watcher",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "frontend",
+    "infrastructure",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w frontend",
+    "build:frontend": "npm run build -w frontend",
+    "lint": "npm run lint -w frontend",
+    "synth": "npm run synth -w infrastructure",
+    "deploy": "npm run deploy -w infrastructure",
+    "build:infra": "npm run build -w infrastructure",
+    "test:infra": "npm run test -w infrastructure",
+    "cdk": "npm run cdk -w infrastructure --"
+  }
+}
