@@ -2,7 +2,23 @@
 !jest.config.js
 *.d.ts
 node_modules
+dist
+dist-ssr
+*.local
+.env
+cdk.out
 
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -52,7 +52,7 @@ export class FrontendStack extends Stack {
     });
 
     // Build and deploy the React application (excluding config.js — deployed separately)
-    const frontendPath = path.join(__dirname, '../frontend');
+    const frontendPath = path.join(__dirname, '../../frontend');
 
     const websiteDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
       sources: [
