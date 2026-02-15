@@ -8,7 +8,7 @@
     "backend"
   ],
   "scripts": {
-    "dev": "npm run dev -w frontend",
+    "frontend": "npm run dev -w frontend",
     "build:frontend": "npm run build -w frontend",
     "lint": "npm run lint -w frontend",
     "synth": "npm run synth -w infrastructure",

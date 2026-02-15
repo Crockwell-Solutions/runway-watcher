@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
-import { 
-  AlertTriangle, Camera, MapPin, Clock, Shield, 
+import { motion, AnimatePresence } from 'framer-motion'
+import { Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area } from 'recharts'
+import {
+  AlertTriangle, Camera, Clock, Shield,
   TrendingUp, Bell, Activity, Target,
-  ChevronRight, Filter, Search, Play, Pause
+  ChevronRight, Filter, Search, Play, Pause,
+  Radio, Eye, Zap
 } from 'lucide-react'
 import './App.css'
 
@@ -19,7 +21,7 @@ interface Hazard {
   status: 'detected' | 'tracking' | 'resolved'
 }
 
-interface Camera {
+interface CameraData {
   id: string
   name: string
   location: string
@@ -38,7 +40,7 @@ interface Alert {
 }
 
 // Dummy Data
-const cameras: Camera[] = [
+const cameras: CameraData[] = [
   { id: 'CAM-001', name: 'Runway 27L Threshold', location: 'North Apron', status: 'online', hazards: 2, lastUpdate: '2 min ago' },
   { id: 'CAM-002', name: 'Runway 09R Approach', location: 'East Perimeter', status: 'online', hazards: 0, lastUpdate: '1 min ago' },
   { id: 'CAM-003', name: 'Taxiway Alpha', location: 'Taxiway A', status: 'online', hazards: 1, lastUpdate: '5 min ago' },
@@ -48,13 +50,13 @@ const cameras: Camera[] = [
 ]
 
 const hazards: Hazard[] = [
-  { id: 'HZ-001', type: 'bird', confidence: 94, location: 'Runway 27L - 500ft AGL', camera: 'CAM-001', timestamp: '10:23:45', severity: 'high', status: 'tracking' },
-  { id: 'HZ-002', type: 'drone', confidence: 87, location: 'North Apron - 200ft AGL', camera: 'CAM-001', timestamp: '10:21:12', severity: 'critical', status: 'detected' },
-  { id: 'HZ-003', type: 'debris', confidence: 76, location: 'Taxiway Alpha - Gate A3', camera: 'CAM-003', timestamp: '10:18:33', severity: 'medium', status: 'tracking' },
-  { id: 'HZ-004', type: 'bird', confidence: 91, location: 'Cargo Apron - Ground Level', camera: 'CAM-004', timestamp: '10:15:22', severity: 'low', status: 'resolved' },
-  { id: 'HZ-005', type: 'vehicle', confidence: 98, location: 'Terminal A - Gate A1', camera: 'CAM-006', timestamp: '10:12:45', severity: 'medium', status: 'tracking' },
-  { id: 'HZ-006', type: 'bird', confidence: 88, location: 'Cargo Apron - 300ft AGL', camera: 'CAM-004', timestamp: '10:08:11', severity: 'high', status: 'detected' },
-  { id: 'HZ-007', type: 'drone', confidence: 92, location: 'North Apron - 150ft AGL', camera: 'CAM-001', timestamp: '10:05:33', severity: 'critical', status: 'tracking' },
+  { id: 'HZ-001', type: 'bird', confidence: 94, location: 'Runway 27L — 500ft AGL', camera: 'CAM-001', timestamp: '10:23:45', severity: 'high', status: 'tracking' },
+  { id: 'HZ-002', type: 'drone', confidence: 87, location: 'North Apron — 200ft AGL', camera: 'CAM-001', timestamp: '10:21:12', severity: 'critical', status: 'detected' },
+  { id: 'HZ-003', type: 'debris', confidence: 76, location: 'Taxiway Alpha — Gate A3', camera: 'CAM-003', timestamp: '10:18:33', severity: 'medium', status: 'tracking' },
+  { id: 'HZ-004', type: 'bird', confidence: 91, location: 'Cargo Apron — Ground Level', camera: 'CAM-004', timestamp: '10:15:22', severity: 'low', status: 'resolved' },
+  { id: 'HZ-005', type: 'vehicle', confidence: 98, location: 'Terminal A — Gate A1', camera: 'CAM-006', timestamp: '10:12:45', severity: 'medium', status: 'tracking' },
+  { id: 'HZ-006', type: 'bird', confidence: 88, location: 'Cargo Apron — 300ft AGL', camera: 'CAM-004', timestamp: '10:08:11', severity: 'high', status: 'detected' },
+  { id: 'HZ-007', type: 'drone', confidence: 92, location: 'North Apron — 150ft AGL', camera: 'CAM-001', timestamp: '10:05:33', severity: 'critical', status: 'tracking' },
 ]
 
 const alerts: Alert[] = [
@@ -89,76 +91,112 @@ const riskScoreData = [
   { time: '23:59', score: 30 },
 ]
 
+// Animation variants
+const fadeIn = {
+  hidden: { opacity: 0, y: 12 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.06, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] }
+  })
+}
+
+const pageTransition = {
+  hidden: { opacity: 0, y: 8 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.15 } }
+}
+
+// Tooltip style
+const tooltipStyle = {
+  backgroundColor: 'rgba(17, 24, 39, 0.95)',
+  border: '1px solid rgba(148, 163, 184, 0.1)',
+  borderRadius: '10px',
+  backdropFilter: 'blur(12px)',
+  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+  padding: '10px 14px',
+  fontSize: '12px',
+}
+
 // Components
-const StatCard = ({ icon: Icon, label, value, trend, trendUp }: { icon: any, label: string, value: string, trend?: string, trendUp?: boolean }) => (
-  <div className="stat-card">
+const StatCard = ({ icon: Icon, label, value, trend, trendUp, index }: { icon: React.ElementType, label: string, value: string, trend?: string, trendUp?: boolean, index: number }) => (
+  <motion.div className="stat-card" custom={index} variants={fadeIn} initial="hidden" animate="visible">
     <div className="stat-icon">
-      <Icon size={24} />
+      <Icon size={22} />
     </div>
     <div className="stat-content">
       <span className="stat-label">{label}</span>
       <span className="stat-value">{value}</span>
       {trend && (
         <span className={`stat-trend ${trendUp ? 'up' : 'down'}`}>
-          <TrendingUp size={14} style={{ transform: trendUp ? 'none' : 'rotate(180deg)' }} />
+          <TrendingUp size={12} style={{ transform: trendUp ? 'none' : 'rotate(180deg)' }} />
           {trend}
         </span>
       )}
     </div>
-  </div>
+  </motion.div>
 )
 
 const HazardTypeIcon = ({ type }: { type: Hazard['type'] }) => {
-  const icons = {
-    bird: '🐦',
-    drone: '🚁',
-    debris: '📦',
-    vehicle: '🚗'
-  }
-  return <span style={{ fontSize: '20px' }}>{icons[type]}</span>
+  const icons = { bird: '🐦', drone: '🛸', debris: '⚠️', vehicle: '🚗' }
+  return <span style={{ fontSize: '18px' }}>{icons[type]}</span>
 }
 
 const SeverityBadge = ({ severity }: { severity: Hazard['severity'] }) => {
-  const colors = {
-    low: '#22c55e',
-    medium: '#f59e0b',
-    high: '#f97316',
-    critical: '#ef4444'
+  const styles: Record<string, { bg: string; color: string }> = {
+    low: { bg: 'rgba(52, 211, 153, 0.15)', color: '#34d399' },
+    medium: { bg: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24' },
+    high: { bg: 'rgba(251, 146, 60, 0.15)', color: '#fb923c' },
+    critical: { bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' },
   }
+  const s = styles[severity]
   return (
-    <span className="severity-badge" style={{ backgroundColor: colors[severity] }}>
-      {severity.toUpperCase()}
+    <span className="severity-badge" style={{ backgroundColor: s.bg, color: s.color }}>
+      {severity}
     </span>
   )
 }
 
-const CameraCard = ({ camera }: { camera: Camera }) => (
-  <div className={`camera-card ${camera.status}`}>
+const CameraCard = ({ camera, index }: { camera: CameraData; index: number }) => (
+  <motion.div
+    className={`camera-card ${camera.status}`}
+    custom={index}
+    variants={fadeIn}
+    initial="hidden"
+    animate="visible"
+    whileHover={{ y: -4 }}
+  >
     <div className="camera-header">
-      <Camera size={18} />
+      <Camera size={14} />
       <span className="camera-id">{camera.id}</span>
       <span className={`camera-status ${camera.status}`}>{camera.status}</span>
     </div>
     <div className="camera-preview">
       <div className="camera-feed">
-        <MapPin size={32} />
+        <Eye size={28} strokeWidth={1.5} />
         <span>{camera.location}</span>
       </div>
     </div>
     <div className="camera-info">
       <span className="camera-name">{camera.name}</span>
       <div className="camera-stats">
-        <span className="hazards-count">{camera.hazards} active hazards</span>
+        <span className="hazards-count">{camera.hazards} active</span>
         <span className="last-update">{camera.lastUpdate}</span>
       </div>
     </div>
-  </div>
+  </motion.div>
 )
 
-const AlertItem = ({ alert }: { alert: Alert }) => (
-  <div className={`alert-item ${alert.severity} ${alert.acknowledged ? 'acknowledged' : ''}`}>
+const AlertItem = ({ alert, index }: { alert: Alert; index: number }) => (
+  <motion.div
+    className={`alert-item ${alert.severity} ${alert.acknowledged ? 'acknowledged' : ''}`}
+    custom={index}
+    variants={fadeIn}
+    initial="hidden"
+    animate="visible"
+  >
     <div className="alert-icon">
-      <Bell size={18} />
+      {alert.severity === 'critical' ? <Zap size={16} /> : <Bell size={16} />}
     </div>
     <div className="alert-content">
       <span className="alert-title">{alert.title}</span>
@@ -166,7 +204,7 @@ const AlertItem = ({ alert }: { alert: Alert }) => (
       <span className="alert-time">{alert.timestamp}</span>
     </div>
     {!alert.acknowledged && <button className="acknowledge-btn">Ack</button>}
-  </div>
+  </motion.div>
 )
 
 function App() {
@@ -178,35 +216,37 @@ function App() {
   const criticalAlerts = alerts.filter(a => a.severity === 'critical' && !a.acknowledged).length
   const onlineCameras = cameras.filter(c => c.status === 'online').length
 
+  const tabs = [
+    { key: 'dashboard' as const, icon: Activity, label: 'Dashboard' },
+    { key: 'cameras' as const, icon: Camera, label: 'Cameras' },
+    { key: 'hazards' as const, icon: AlertTriangle, label: 'Hazards' },
+    { key: 'history' as const, icon: Clock, label: 'History' },
+  ]
+
   return (
     <div className="app">
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="logo">
-          <Target size={32} />
+          <Target size={26} strokeWidth={2.5} />
           <span>RunwayWatcher</span>
         </div>
         <nav className="nav">
-          <button className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-            <Activity size={20} />
-            <span>Dashboard</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'cameras' ? 'active' : ''}`} onClick={() => setActiveTab('cameras')}>
-            <Camera size={20} />
-            <span>Cameras</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'hazards' ? 'active' : ''}`} onClick={() => setActiveTab('hazards')}>
-            <AlertTriangle size={20} />
-            <span>Hazards</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
-            <Clock size={20} />
-            <span>History</span>
-          </button>
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              className={`nav-item ${activeTab === tab.key ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+              aria-label={tab.label}
+            >
+              <tab.icon size={20} />
+              <span>{tab.label}</span>
+            </button>
+          ))}
         </nav>
         <div className="sidebar-footer">
           <div className="system-status">
-            <div className="status-indicator online"></div>
+            <div className="status-indicator online" />
             <span>System Online</span>
           </div>
         </div>
@@ -214,305 +254,300 @@ function App() {
 
       {/* Main Content */}
       <main className="main-content">
-        {/* Header */}
         <header className="header">
           <div className="header-left">
-            <h1>Airport Hazard Detection System</h1>
-            <span className="airport-code">KJFK - John F. Kennedy International</span>
+            <h1>Hazard Detection</h1>
+            <span className="airport-code">KJFK</span>
           </div>
           <div className="header-right">
             <div className="live-indicator">
-              <span className="pulse"></span>
-              <span>LIVE</span>
+              <span className="pulse" />
+              <span>Live</span>
             </div>
-            <button className="control-btn" onClick={() => setIsPaused(!isPaused)}>
-              {isPaused ? <Play size={18} /> : <Pause size={18} />}
+            <button className="control-btn" onClick={() => setIsPaused(!isPaused)} aria-label={isPaused ? 'Resume' : 'Pause'}>
+              {isPaused ? <Play size={16} /> : <Pause size={16} />}
             </button>
-            <button className="control-btn">
-              <Bell size={18} />
-              <span className="notification-badge">{criticalAlerts}</span>
+            <button className="control-btn" aria-label="Notifications">
+              <Bell size={16} />
+              {criticalAlerts > 0 && <span className="notification-badge">{criticalAlerts}</span>}
             </button>
             <div className="search-box">
-              <Search size={18} />
-              <input type="text" placeholder="Search cameras, hazards..." />
+              <Search size={16} />
+              <input type="text" placeholder="Search..." aria-label="Search cameras and hazards" />
             </div>
           </div>
         </header>
 
-        {/* Dashboard Content */}
-        {activeTab === 'dashboard' && (
-          <div className="dashboard">
-            {/* Stats Row */}
-            <div className="stats-row">
-              <StatCard icon={AlertTriangle} label="Active Hazards" value={activeHazards.toString()} trend="+3 today" trendUp={true} />
-              <StatCard icon={Camera} label="Online Cameras" value={`${onlineCameras}/${cameras.length}`} />
-              <StatCard icon={Bell} label="Critical Alerts" value={criticalAlerts.toString()} trend="2 unresolved" trendUp={false} />
-              <StatCard icon={Shield} label="Risk Score" value="72/100" trend="-5 from avg" trendUp={false} />
-            </div>
-
-            {/* Main Grid */}
-            <div className="dashboard-grid">
-              {/* Map Section */}
-              <div className="card map-section">
-                <div className="card-header">
-                  <h2>Airport Overview</h2>
-                  <div className="card-actions">
-                    <button className="filter-btn"><Filter size={16} /></button>
-                  </div>
-                </div>
-                <div className="airport-map">
-                  <div className="runway runway-27l">Runway 27L</div>
-                  <div className="runway runway-27r">Runway 27R</div>
-                  <div className="taxiway taxiway-a">Taxiway A</div>
-                  <div className="taxiway taxiway-b">Taxiway B</div>
-                  <div className="apron north-apron">North Apron</div>
-                  <div className="apron south-apron">South Apron</div>
-                  <div className="apron cargo-apron">Cargo Apron</div>
-                  <div className="terminal terminal-a">Terminal A</div>
-                  <div className="terminal terminal-b">Terminal B</div>
-                  {/* Hazard Markers */}
-                  <div className="hazard-marker critical" style={{ top: '20%', left: '30%' }} title="Drone - Critical">
-                    <AlertTriangle size={20} />
-                  </div>
-                  <div className="hazard-marker high" style={{ top: '35%', left: '25%' }} title="Bird - High">
-                    <AlertTriangle size={20} />
-                  </div>
-                  <div className="hazard-marker medium" style={{ top: '60%', left: '45%' }} title="Debris - Medium">
-                    <AlertTriangle size={20} />
-                  </div>
-                  <div className="hazard-marker high" style={{ top: '70%', left: '35%' }} title="Bird - High">
-                    <AlertTriangle size={20} />
-                  </div>
-                  {/* Camera Markers */}
-                  <div className="camera-marker" style={{ top: '15%', left: '28%' }} title="CAM-001">
-                    <Camera size={16} />
-                  </div>
-                  <div className="camera-marker" style={{ top: '10%', left: '60%' }} title="CAM-002">
-                    <Camera size={16} />
-                  </div>
-                  <div className="camera-marker" style={{ top: '45%', left: '40%' }} title="CAM-003">
-                    <Camera size={16} />
-                  </div>
-                  <div className="camera-marker" style={{ top: '75%', left: '30%' }} title="CAM-004">
-                    <Camera size={16} />
-                  </div>
-                  <div className="camera-marker offline" style={{ top: '25%', left: '35%' }} title="CAM-005 (Offline)">
-                    <Camera size={16} />
-                  </div>
-                  <div className="camera-marker" style={{ top: '50%', left: '55%' }} title="CAM-006">
-                    <Camera size={16} />
-                  </div>
-                </div>
+        <AnimatePresence mode="wait">
+          {/* Dashboard */}
+          {activeTab === 'dashboard' && (
+            <motion.div className="dashboard" key="dashboard" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
+              <div className="stats-row">
+                <StatCard icon={AlertTriangle} label="Active Hazards" value={activeHazards.toString()} trend="+3 today" trendUp index={0} />
+                <StatCard icon={Radio} label="Online Cameras" value={`${onlineCameras}/${cameras.length}`} index={1} />
+                <StatCard icon={Zap} label="Critical Alerts" value={criticalAlerts.toString()} trend="2 unresolved" trendUp={false} index={2} />
+                <StatCard icon={Shield} label="Risk Score" value="72" trend="−5 from avg" trendUp={false} index={3} />
               </div>
 
-              {/* Alerts Panel */}
-              <div className="card alerts-panel">
-                <div className="card-header">
-                  <h2>Recent Alerts</h2>
-                  <button className="view-all-btn">View All <ChevronRight size={16} /></button>
-                </div>
-                <div className="alerts-list">
-                  {alerts.map(alert => <AlertItem key={alert.id} alert={alert} />)}
+              <div className="dashboard-grid">
+                {/* Map */}
+                <motion.div className="card map-section" custom={4} variants={fadeIn} initial="hidden" animate="visible">
+                  <div className="card-header">
+                    <h2>Airport Overview</h2>
+                    <button className="filter-btn" aria-label="Filter map"><Filter size={16} /></button>
+                  </div>
+                  <div className="airport-map">
+                    <div className="runway runway-27l">RWY 27L</div>
+                    <div className="runway runway-27r">RWY 27R</div>
+                    <div className="taxiway taxiway-a">TWY A</div>
+                    <div className="taxiway taxiway-b">TWY B</div>
+                    <div className="apron north-apron">N. Apron</div>
+                    <div className="apron south-apron">S. Apron</div>
+                    <div className="apron cargo-apron">Cargo</div>
+                    <div className="terminal terminal-a">Term A</div>
+                    <div className="terminal terminal-b">Term B</div>
+                    <div className="hazard-marker critical" style={{ top: '20%', left: '30%' }} title="Drone — Critical">
+                      <AlertTriangle size={14} />
+                    </div>
+                    <div className="hazard-marker high" style={{ top: '35%', left: '25%' }} title="Bird — High">
+                      <AlertTriangle size={14} />
+                    </div>
+                    <div className="hazard-marker medium" style={{ top: '60%', left: '45%' }} title="Debris — Medium">
+                      <AlertTriangle size={14} />
+                    </div>
+                    <div className="hazard-marker high" style={{ top: '70%', left: '35%' }} title="Bird — High">
+                      <AlertTriangle size={14} />
+                    </div>
+                    <div className="camera-marker" style={{ top: '15%', left: '28%' }} title="CAM-001"><Camera size={13} /></div>
+                    <div className="camera-marker" style={{ top: '10%', left: '60%' }} title="CAM-002"><Camera size={13} /></div>
+                    <div className="camera-marker" style={{ top: '45%', left: '40%' }} title="CAM-003"><Camera size={13} /></div>
+                    <div className="camera-marker" style={{ top: '75%', left: '30%' }} title="CAM-004"><Camera size={13} /></div>
+                    <div className="camera-marker offline" style={{ top: '25%', left: '35%' }} title="CAM-005 (Offline)"><Camera size={13} /></div>
+                    <div className="camera-marker" style={{ top: '50%', left: '55%' }} title="CAM-006"><Camera size={13} /></div>
+                  </div>
+                </motion.div>
+
+                {/* Alerts */}
+                <motion.div className="card alerts-panel" custom={5} variants={fadeIn} initial="hidden" animate="visible">
+                  <div className="card-header">
+                    <h2>Alerts</h2>
+                    <button className="view-all-btn">All <ChevronRight size={14} /></button>
+                  </div>
+                  <div className="alerts-list">
+                    {alerts.map((alert, i) => <AlertItem key={alert.id} alert={alert} index={i} />)}
+                  </div>
+                </motion.div>
+
+                {/* Hazard Activity Chart */}
+                <motion.div className="card chart-card" custom={6} variants={fadeIn} initial="hidden" animate="visible">
+                  <div className="card-header">
+                    <h2>Hazard Activity (24h)</h2>
+                  </div>
+                  <ResponsiveContainer width="100%" height={190}>
+                    <AreaChart data={hourlyData}>
+                      <defs>
+                        <linearGradient id="gradBirds" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#34d399" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gradDrones" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                      <XAxis dataKey="hour" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Area type="monotone" dataKey="birds" stroke="#34d399" strokeWidth={2} fill="url(#gradBirds)" />
+                      <Area type="monotone" dataKey="drones" stroke="#f87171" strokeWidth={2} fill="url(#gradDrones)" />
+                      <Line type="monotone" dataKey="debris" stroke="#fbbf24" strokeWidth={2} dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <div className="chart-legend">
+                    <span className="legend-item"><span className="dot birds" /> Birds</span>
+                    <span className="legend-item"><span className="dot drones" /> Drones</span>
+                    <span className="legend-item"><span className="dot debris" /> Debris</span>
+                  </div>
+                </motion.div>
+
+                {/* Risk Score Chart */}
+                <motion.div className="card chart-card" custom={7} variants={fadeIn} initial="hidden" animate="visible">
+                  <div className="card-header">
+                    <h2>Risk Score Trend</h2>
+                  </div>
+                  <ResponsiveContainer width="100%" height={190}>
+                    <BarChart data={riskScoreData}>
+                      <defs>
+                        <linearGradient id="gradRisk" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#818cf8" stopOpacity={0.9} />
+                          <stop offset="100%" stopColor="#6366f1" stopOpacity={0.4} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                      <XAxis dataKey="time" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#475569" fontSize={11} domain={[0, 100]} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Bar dataKey="score" fill="url(#gradRisk)" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </motion.div>
+
+                {/* Active Hazards Table */}
+                <motion.div className="card hazards-panel" custom={8} variants={fadeIn} initial="hidden" animate="visible">
+                  <div className="card-header">
+                    <h2>Active Hazards</h2>
+                    <button className="view-all-btn" onClick={() => setActiveTab('hazards')}>All <ChevronRight size={14} /></button>
+                  </div>
+                  <div className="hazards-table">
+                    <div className="table-header">
+                      <span>Type</span>
+                      <span>Location</span>
+                      <span>Confidence</span>
+                      <span>Severity</span>
+                      <span>Status</span>
+                    </div>
+                    {hazards.slice(0, 5).map(hazard => (
+                      <div
+                        key={hazard.id}
+                        className={`table-row ${selectedHazard?.id === hazard.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedHazard(hazard)}
+                      >
+                        <span className="hazard-type"><HazardTypeIcon type={hazard.type} /></span>
+                        <span className="hazard-location">{hazard.location}</span>
+                        <span className="hazard-confidence">{hazard.confidence}%</span>
+                        <SeverityBadge severity={hazard.severity} />
+                        <span className={`hazard-status ${hazard.status}`}>{hazard.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Cameras */}
+          {activeTab === 'cameras' && (
+            <motion.div className="cameras-view" key="cameras" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
+              <div className="cameras-header">
+                <h2>Camera Feeds</h2>
+                <div className="camera-filters">
+                  <button className="filter-chip active">All ({cameras.length})</button>
+                  <button className="filter-chip">Online ({onlineCameras})</button>
+                  <button className="filter-chip">Offline ({cameras.filter(c => c.status === 'offline').length})</button>
+                  <button className="filter-chip">Maintenance ({cameras.filter(c => c.status === 'maintenance').length})</button>
                 </div>
               </div>
+              <div className="cameras-grid">
+                {cameras.map((camera, i) => <CameraCard key={camera.id} camera={camera} index={i} />)}
+              </div>
+            </motion.div>
+          )}
 
-              {/* Charts */}
-              <div className="card chart-card">
-                <div className="card-header">
-                  <h2>Hazard Activity (24h)</h2>
-                </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={hourlyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="hour" stroke="#9ca3af" fontSize={12} />
-                    <YAxis stroke="#9ca3af" fontSize={12} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px' }} />
-                    <Line type="monotone" dataKey="birds" stroke="#22c55e" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="drones" stroke="#ef4444" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="debris" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-                <div className="chart-legend">
-                  <span className="legend-item"><span className="dot birds"></span> Birds</span>
-                  <span className="legend-item"><span className="dot drones"></span> Drones</span>
-                  <span className="legend-item"><span className="dot debris"></span> Debris</span>
+          {/* Hazards */}
+          {activeTab === 'hazards' && (
+            <motion.div className="hazards-view" key="hazards" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
+              <div className="hazards-header">
+                <h2>All Hazards</h2>
+                <div className="hazard-filters">
+                  <select className="filter-select" aria-label="Filter by type">
+                    <option>All Types</option>
+                    <option>Birds</option>
+                    <option>Drones</option>
+                    <option>Debris</option>
+                    <option>Vehicles</option>
+                  </select>
+                  <select className="filter-select" aria-label="Filter by severity">
+                    <option>All Severities</option>
+                    <option>Critical</option>
+                    <option>High</option>
+                    <option>Medium</option>
+                    <option>Low</option>
+                  </select>
+                  <select className="filter-select" aria-label="Filter by status">
+                    <option>All Statuses</option>
+                    <option>Detected</option>
+                    <option>Tracking</option>
+                    <option>Resolved</option>
+                  </select>
                 </div>
               </div>
+              <div className="hazards-list">
+                {hazards.map((hazard, i) => (
+                  <motion.div key={hazard.id} className="hazard-detail-card" custom={i} variants={fadeIn} initial="hidden" animate="visible">
+                    <div className="hazard-detail-header">
+                      <HazardTypeIcon type={hazard.type} />
+                      <div className="hazard-detail-info">
+                        <span className="hazard-id">{hazard.id}</span>
+                        <span className="hazard-camera">{hazard.camera} · {hazard.timestamp}</span>
+                      </div>
+                      <SeverityBadge severity={hazard.severity} />
+                    </div>
+                    <div className="hazard-detail-body">
+                      <div className="detail-row">
+                        <span className="detail-label">Location</span>
+                        <span className="detail-value">{hazard.location}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Confidence</span>
+                        <span className="detail-value">{hazard.confidence}%</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Status</span>
+                        <span className={`detail-value status-${hazard.status}`}>{hazard.status}</span>
+                      </div>
+                    </div>
+                    <div className="hazard-detail-actions">
+                      <button className="action-btn primary">Track</button>
+                      <button className="action-btn secondary">View Feed</button>
+                      <button className="action-btn">Resolve</button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
 
-              <div className="card chart-card">
-                <div className="card-header">
-                  <h2>Risk Score Trend</h2>
+          {/* History */}
+          {activeTab === 'history' && (
+            <motion.div className="history-view" key="history" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
+              <div className="history-header">
+                <h2>Historical Data</h2>
+                <div className="date-range">
+                  <input type="date" defaultValue="2026-02-15" aria-label="Start date" />
+                  <span>to</span>
+                  <input type="date" defaultValue="2026-02-15" aria-label="End date" />
                 </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={riskScoreData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="time" stroke="#9ca3af" fontSize={12} />
-                    <YAxis stroke="#9ca3af" fontSize={12} domain={[0, 100]} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px' }} />
-                    <Bar dataKey="score" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              </div>
+              <div className="history-stats">
+                {[
+                  { value: '247', label: 'Total Detections' },
+                  { value: '89%', label: 'Avg Confidence' },
+                  { value: '12', label: 'Critical Events' },
+                  { value: '4.2m', label: 'Avg Response' },
+                ].map((stat, i) => (
+                  <motion.div key={stat.label} className="history-stat" custom={i} variants={fadeIn} initial="hidden" animate="visible">
+                    <span className="history-stat-value">{stat.value}</span>
+                    <span className="history-stat-label">{stat.label}</span>
+                  </motion.div>
+                ))}
+              </div>
+              <motion.div className="history-chart" custom={4} variants={fadeIn} initial="hidden" animate="visible">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={hourlyData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
+                    <XAxis dataKey="hour" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Bar dataKey="birds" stackId="a" fill="#34d399" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="drones" stackId="a" fill="#f87171" />
+                    <Bar dataKey="debris" stackId="a" fill="#fbbf24" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-
-              {/* Recent Hazards */}
-              <div className="card hazards-panel">
-                <div className="card-header">
-                  <h2>Active Hazards</h2>
-                  <button className="view-all-btn">View All <ChevronRight size={16} /></button>
-                </div>
-                <div className="hazards-table">
-                  <div className="table-header">
-                    <span>Type</span>
-                    <span>Location</span>
-                    <span>Confidence</span>
-                    <span>Severity</span>
-                    <span>Status</span>
-                  </div>
-                  {hazards.slice(0, 5).map(hazard => (
-                    <div 
-                      key={hazard.id} 
-                      className={`table-row ${selectedHazard?.id === hazard.id ? 'selected' : ''}`}
-                      onClick={() => setSelectedHazard(hazard)}
-                    >
-                      <span className="hazard-type"><HazardTypeIcon type={hazard.type} /></span>
-                      <span className="hazard-location">{hazard.location}</span>
-                      <span className="hazard-confidence">{hazard.confidence}%</span>
-                      <SeverityBadge severity={hazard.severity} />
-                      <span className={`hazard-status ${hazard.status}`}>{hazard.status}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Cameras Tab */}
-        {activeTab === 'cameras' && (
-          <div className="cameras-view">
-            <div className="cameras-header">
-              <h2>Camera Feeds</h2>
-              <div className="camera-filters">
-                <button className="filter-chip active">All ({cameras.length})</button>
-                <button className="filter-chip">Online ({onlineCameras})</button>
-                <button className="filter-chip">Offline ({cameras.filter(c => c.status === 'offline').length})</button>
-                <button className="filter-chip">Maintenance ({cameras.filter(c => c.status === 'maintenance').length})</button>
-              </div>
-            </div>
-            <div className="cameras-grid">
-              {cameras.map(camera => <CameraCard key={camera.id} camera={camera} />)}
-            </div>
-          </div>
-        )}
-
-        {/* Hazards Tab */}
-        {activeTab === 'hazards' && (
-          <div className="hazards-view">
-            <div className="hazards-header">
-              <h2>All Hazards</h2>
-              <div className="hazard-filters">
-                <select className="filter-select">
-                  <option>All Types</option>
-                  <option>Birds</option>
-                  <option>Drones</option>
-                  <option>Debris</option>
-                  <option>Vehicles</option>
-                </select>
-                <select className="filter-select">
-                  <option>All Severities</option>
-                  <option>Critical</option>
-                  <option>High</option>
-                  <option>Medium</option>
-                  <option>Low</option>
-                </select>
-                <select className="filter-select">
-                  <option>All Statuses</option>
-                  <option>Detected</option>
-                  <option>Tracking</option>
-                  <option>Resolved</option>
-                </select>
-              </div>
-            </div>
-            <div className="hazards-list">
-              {hazards.map(hazard => (
-                <div key={hazard.id} className="hazard-detail-card">
-                  <div className="hazard-detail-header">
-                    <HazardTypeIcon type={hazard.type} />
-                    <div className="hazard-detail-info">
-                      <span className="hazard-id">{hazard.id}</span>
-                      <span className="hazard-camera">{hazard.camera} • {hazard.timestamp}</span>
-                    </div>
-                    <SeverityBadge severity={hazard.severity} />
-                  </div>
-                  <div className="hazard-detail-body">
-                    <div className="detail-row">
-                      <span className="detail-label">Location</span>
-                      <span className="detail-value">{hazard.location}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Confidence</span>
-                      <span className="detail-value">{hazard.confidence}%</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Status</span>
-                      <span className={`detail-value status-${hazard.status}`}>{hazard.status}</span>
-                    </div>
-                  </div>
-                  <div className="hazard-detail-actions">
-                    <button className="action-btn primary">Track</button>
-                    <button className="action-btn secondary">View Feed</button>
-                    <button className="action-btn">Resolve</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* History Tab */}
-        {activeTab === 'history' && (
-          <div className="history-view">
-            <div className="history-header">
-              <h2>Historical Data</h2>
-              <div className="date-range">
-                <input type="date" defaultValue="2026-02-15" />
-                <span>to</span>
-                <input type="date" defaultValue="2026-02-15" />
-              </div>
-            </div>
-            <div className="history-stats">
-              <div className="history-stat">
-                <span className="history-stat-value">247</span>
-                <span className="history-stat-label">Total Detections</span>
-              </div>
-              <div className="history-stat">
-                <span className="history-stat-value">89%</span>
-                <span className="history-stat-label">Avg Confidence</span>
-              </div>
-              <div className="history-stat">
-                <span className="history-stat-value">12</span>
-                <span className="history-stat-label">Critical Events</span>
-              </div>
-              <div className="history-stat">
-                <span className="history-stat-value">4.2 min</span>
-                <span className="history-stat-label">Avg Response Time</span>
-              </div>
-            </div>
-            <div className="history-chart">
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={hourlyData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="hour" stroke="#9ca3af" />
-                  <YAxis stroke="#9ca3af" />
-                  <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px' }} />
-                  <Bar dataKey="birds" stackId="a" fill="#22c55e" />
-                  <Bar dataKey="drones" stackId="a" fill="#ef4444" />
-                  <Bar dataKey="debris" stackId="a" fill="#f59e0b" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   )
