@@ -122,5 +122,41 @@ export class RunwayWatcherStatelessStack extends Stack {
       },
       targets: [new targets.LambdaFunction(processImageLambda.lambda)],
     });
+
+    // Lambda function to query DynamoDB for latest camera images and return presigned S3 URLs
+    const getLatestImagesLambda = new CustomLambda(this, 'GetLatestImagesFunction', {
+      functionName: `get-latest-images-${props.stage}`,
+      source: 'backend/get-latest-images.ts',
+      envConfig: props.envConfig,
+      environmentVariables: {
+        TABLE_NAME: props.runwayWatcherTable.tableName,
+        BUCKET_NAME: props.cameraImagesBucketName,
+      },
+    });
+
+    // Grant read access to DynamoDB and S3
+    props.runwayWatcherTable.grantReadData(getLatestImagesLambda.lambda);
+    cameraImagesBucket.grantRead(getLatestImagesLambda.lambda);
+
+    // GET /cameras/latest endpoint
+    const camerasResource = api.root.addResource('cameras');
+    const latestResource = camerasResource.addResource('latest');
+    latestResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestImagesLambda.lambda));
+
+    // Lambda function to query DynamoDB for camera alerts
+    const getAlertsLambda = new CustomLambda(this, 'GetAlertsFunction', {
+      functionName: `get-alerts-${props.stage}`,
+      source: 'backend/get-alerts.ts',
+      envConfig: props.envConfig,
+      environmentVariables: {
+        TABLE_NAME: props.runwayWatcherTable.tableName,
+      },
+    });
+
+    props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
+
+    // GET /cameras/alerts endpoint
+    const alertsResource = camerasResource.addResource('alerts');
+    alertsResource.addMethod('GET', new apigateway.LambdaIntegration(getAlertsLambda.lambda));
   }
 }
