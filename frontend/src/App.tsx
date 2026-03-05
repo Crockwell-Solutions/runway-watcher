@@ -1,554 +1,549 @@
-import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area } from 'recharts'
+import React from 'react'
+import { motion } from 'framer-motion'
 import {
-  AlertTriangle, Camera, Clock, Shield,
-  TrendingUp, Bell, Activity, Target,
-  ChevronRight, Filter, Search, Play, Pause,
-  Radio, Eye, Zap
+  Map, Bell, Video,
+  Plus, Minus,
+  Zap, MoreVertical, Eye, Locate
 } from 'lucide-react'
+import runwayWatcherLogo from './assets/runway-watcher.svg'
 import './App.css'
 
-// Types
-interface Hazard {
-  id: string
-  type: 'bird' | 'drone' | 'debris' | 'vehicle'
-  confidence: number
-  location: string
-  camera: string
-  timestamp: string
-  severity: 'low' | 'medium' | 'high' | 'critical'
-  status: 'detected' | 'tracking' | 'resolved'
-}
-
-interface CameraData {
-  id: string
-  name: string
-  location: string
-  status: 'online' | 'offline' | 'maintenance'
-  hazards: number
-  lastUpdate: string
-}
+// ── Types ──
+type Page = 'map' | 'cameras'
 
 interface Alert {
   id: string
   title: string
-  message: string
-  severity: 'low' | 'medium' | 'high' | 'critical'
-  timestamp: string
-  acknowledged: boolean
+  severity: 'critical' | 'high' | 'info'
+  label: string
+  score: number
+  description: string
+  imageUrl?: string
+  actionLabel: string
 }
 
-// Dummy Data
-const cameras: CameraData[] = [
-  { id: 'CAM-001', name: 'Runway 27L Threshold', location: 'North Apron', status: 'online', hazards: 2, lastUpdate: '2 min ago' },
-  { id: 'CAM-002', name: 'Runway 09R Approach', location: 'East Perimeter', status: 'online', hazards: 0, lastUpdate: '1 min ago' },
-  { id: 'CAM-003', name: 'Taxiway Alpha', location: 'Taxiway A', status: 'online', hazards: 1, lastUpdate: '5 min ago' },
-  { id: 'CAM-004', name: 'Cargo Apron', location: 'South Cargo', status: 'online', hazards: 3, lastUpdate: '3 min ago' },
-  { id: 'CAM-005', name: 'Runway 27R Threshold', location: 'South Apron', status: 'maintenance', hazards: 0, lastUpdate: '1 hour ago' },
-  { id: 'CAM-006', name: 'Terminal Gate A1', location: 'Terminal A', status: 'online', hazards: 1, lastUpdate: '4 min ago' },
-]
+interface CameraFeed {
+  id: string
+  name: string
+  location: string
+  status: 'recording' | 'online' | 'offline' | 'maintenance'
+  imageUrl: string
+}
 
-const hazards: Hazard[] = [
-  { id: 'HZ-001', type: 'bird', confidence: 94, location: 'Runway 27L — 500ft AGL', camera: 'CAM-001', timestamp: '10:23:45', severity: 'high', status: 'tracking' },
-  { id: 'HZ-002', type: 'drone', confidence: 87, location: 'North Apron — 200ft AGL', camera: 'CAM-001', timestamp: '10:21:12', severity: 'critical', status: 'detected' },
-  { id: 'HZ-003', type: 'debris', confidence: 76, location: 'Taxiway Alpha — Gate A3', camera: 'CAM-003', timestamp: '10:18:33', severity: 'medium', status: 'tracking' },
-  { id: 'HZ-004', type: 'bird', confidence: 91, location: 'Cargo Apron — Ground Level', camera: 'CAM-004', timestamp: '10:15:22', severity: 'low', status: 'resolved' },
-  { id: 'HZ-005', type: 'vehicle', confidence: 98, location: 'Terminal A — Gate A1', camera: 'CAM-006', timestamp: '10:12:45', severity: 'medium', status: 'tracking' },
-  { id: 'HZ-006', type: 'bird', confidence: 88, location: 'Cargo Apron — 300ft AGL', camera: 'CAM-004', timestamp: '10:08:11', severity: 'high', status: 'detected' },
-  { id: 'HZ-007', type: 'drone', confidence: 92, location: 'North Apron — 150ft AGL', camera: 'CAM-001', timestamp: '10:05:33', severity: 'critical', status: 'tracking' },
-]
-
+// ── Dummy Data ──
 const alerts: Alert[] = [
-  { id: 'ALT-001', title: 'Critical: Drone Detected', message: 'Unauthorized drone detected in restricted airspace near Runway 27L', severity: 'critical', timestamp: '10:23:45', acknowledged: false },
-  { id: 'ALT-002', title: 'High: Bird Activity', message: 'Flock of birds detected at 500ft approaching approach path', severity: 'high', timestamp: '10:21:12', acknowledged: false },
-  { id: 'ALT-003', title: 'Medium: Foreign Object', message: 'Possible debris detected on Taxiway Alpha', severity: 'medium', timestamp: '10:18:33', acknowledged: true },
-  { id: 'ALT-004', title: 'Low: Vehicle Movement', message: 'Unidentified vehicle detected in terminal area', severity: 'low', timestamp: '10:12:45', acknowledged: true },
+  {
+    id: 'ALT-001',
+    title: 'Drone Sighted Sector 4',
+    severity: 'critical',
+    label: 'CRITICAL',
+    score: 92,
+    description: '',
+    imageUrl: 'https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=400&h=250&fit=crop',
+    actionLabel: 'TAKE ACTION',
+  },
+  {
+    id: 'ALT-002',
+    title: 'Bird Strike - North',
+    severity: 'high',
+    label: 'HIGH RISK',
+    score: 78,
+    description: 'Increased activity detected on North approach Glide Path.',
+    actionLabel: 'NOTIFY GROUND CREW',
+  },
+  {
+    id: 'ALT-003',
+    title: 'FOD Detected Taxiway B',
+    severity: 'info',
+    label: 'INFO',
+    score: 45,
+    description: 'Small metallic debris identified by automated sweeps. Priority: Routine.',
+    actionLabel: 'ACKNOWLEDGE',
+  },
 ]
 
-const hourlyData = [
-  { hour: '06:00', birds: 12, drones: 2, debris: 3 },
-  { hour: '07:00', birds: 18, drones: 4, debris: 5 },
-  { hour: '08:00', birds: 25, drones: 3, debris: 4 },
-  { hour: '09:00', birds: 22, drones: 5, debris: 6 },
-  { hour: '10:00', birds: 28, drones: 7, debris: 4 },
-  { hour: '11:00', birds: 19, drones: 4, debris: 3 },
-  { hour: '12:00', birds: 15, drones: 2, debris: 2 },
-  { hour: '13:00', birds: 21, drones: 3, debris: 4 },
-  { hour: '14:00', birds: 24, drones: 6, debris: 5 },
-  { hour: '15:00', birds: 20, drones: 4, debris: 3 },
-  { hour: '16:00', birds: 16, drones: 3, debris: 2 },
-  { hour: '17:00', birds: 14, drones: 2, debris: 1 },
+const cameraFeeds: CameraFeed[] = [
+  { id: 'CAM-01', name: 'RUNWAY NORTH', location: 'North Runway 09L/27R', status: 'recording', imageUrl: 'https://images.unsplash.com/photo-1436491865332-7a61a109db05?w=400&h=200&fit=crop' },
+  { id: 'CAM-02', name: 'TERMINAL 4', location: 'Terminal 4 Apron', status: 'recording', imageUrl: 'https://images.unsplash.com/photo-1529074963764-98f45c47344b?w=400&h=200&fit=crop' },
+  { id: 'CAM-03', name: 'PERIMETER EAST', location: 'East Perimeter Fence', status: 'online', imageUrl: 'https://images.unsplash.com/photo-1540962351504-03099e0a754b?w=400&h=200&fit=crop' },
+  { id: 'CAM-04', name: 'FUEL FARM', location: 'South Fuel Storage', status: 'online', imageUrl: 'https://images.unsplash.com/photo-1474302770737-173ee21bab63?w=400&h=200&fit=crop' },
+  { id: 'CAM-05', name: 'TAXIWAY BRAVO', location: 'Taxiway B Junction', status: 'recording', imageUrl: 'https://images.unsplash.com/photo-1436491865332-7a61a109db05?w=400&h=200&fit=crop' },
+  { id: 'CAM-06', name: 'RUNWAY SOUTH', location: 'South Runway 09R/27L', status: 'offline', imageUrl: 'https://images.unsplash.com/photo-1529074963764-98f45c47344b?w=400&h=200&fit=crop' },
+  { id: 'CAM-07', name: 'CONTROL TOWER', location: 'ATC Tower Base', status: 'recording', imageUrl: 'https://images.unsplash.com/photo-1540962351504-03099e0a754b?w=400&h=200&fit=crop' },
+  { id: 'CAM-08', name: 'CARGO AREA', location: 'West Cargo Terminal', status: 'maintenance', imageUrl: 'https://images.unsplash.com/photo-1474302770737-173ee21bab63?w=400&h=200&fit=crop' },
 ]
 
-const riskScoreData = [
-  { time: '00:00', score: 25 },
-  { time: '04:00', score: 20 },
-  { time: '08:00', score: 65 },
-  { time: '12:00', score: 55 },
-  { time: '16:00', score: 70 },
-  { time: '20:00', score: 45 },
-  { time: '23:59', score: 30 },
-]
-
-// Animation variants
-const fadeIn = {
-  hidden: { opacity: 0, y: 12 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.06, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] }
-  })
+// ── Severity colors ──
+const severityColors = {
+  critical: { border: 'border-red-500/20', bg: 'bg-red-500/5', text: 'text-red-500', scoreBg: 'bg-red-500/20' },
+  high: { border: 'border-amber-500/20', bg: 'bg-amber-500/5', text: 'text-amber-500', scoreBg: 'bg-amber-500/20' },
+  info: { border: 'border-slate-700', bg: 'bg-slate-800/20', text: 'text-slate-400', scoreBg: 'bg-slate-700/50' },
 }
 
-const pageTransition = {
-  hidden: { opacity: 0, y: 8 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] } },
-  exit: { opacity: 0, y: -8, transition: { duration: 0.15 } }
+const statusColors: Record<string, { dot: string; text: string; label: string }> = {
+  recording: { dot: 'bg-red-500', text: 'text-red-400', label: 'REC' },
+  online: { dot: 'bg-emerald-500', text: 'text-emerald-400', label: 'ONLINE' },
+  offline: { dot: 'bg-slate-500', text: 'text-slate-400', label: 'OFFLINE' },
+  maintenance: { dot: 'bg-amber-500', text: 'text-amber-400', label: 'MAINT' },
 }
 
-// Tooltip style
-const tooltipStyle = {
-  backgroundColor: 'rgba(17, 24, 39, 0.95)',
-  border: '1px solid rgba(148, 163, 184, 0.1)',
-  borderRadius: '10px',
-  backdropFilter: 'blur(12px)',
-  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-  padding: '10px 14px',
-  fontSize: '12px',
-}
+// ── Components ──
 
-// Components
-const StatCard = ({ icon: Icon, label, value, trend, trendUp, index }: { icon: React.ElementType, label: string, value: string, trend?: string, trendUp?: boolean, index: number }) => (
-  <motion.div className="stat-card" custom={index} variants={fadeIn} initial="hidden" animate="visible">
-    <div className="stat-icon">
-      <Icon size={22} />
-    </div>
-    <div className="stat-content">
-      <span className="stat-label">{label}</span>
-      <span className="stat-value">{value}</span>
-      {trend && (
-        <span className={`stat-trend ${trendUp ? 'up' : 'down'}`}>
-          <TrendingUp size={12} style={{ transform: trendUp ? 'none' : 'rotate(180deg)' }} />
-          {trend}
-        </span>
-      )}
-    </div>
-  </motion.div>
-)
-
-const HazardTypeIcon = ({ type }: { type: Hazard['type'] }) => {
-  const icons = { bird: '🐦', drone: '🛸', debris: '⚠️', vehicle: '🚗' }
-  return <span style={{ fontSize: '18px' }}>{icons[type]}</span>
-}
-
-const SeverityBadge = ({ severity }: { severity: Hazard['severity'] }) => {
-  const styles: Record<string, { bg: string; color: string }> = {
-    low: { bg: 'rgba(52, 211, 153, 0.15)', color: '#34d399' },
-    medium: { bg: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24' },
-    high: { bg: 'rgba(251, 146, 60, 0.15)', color: '#fb923c' },
-    critical: { bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' },
-  }
-  const s = styles[severity]
-  return (
-    <span className="severity-badge" style={{ backgroundColor: s.bg, color: s.color }}>
-      {severity}
-    </span>
-  )
-}
-
-const CameraCard = ({ camera, index }: { camera: CameraData; index: number }) => (
-  <motion.div
-    className={`camera-card ${camera.status}`}
-    custom={index}
-    variants={fadeIn}
-    initial="hidden"
-    animate="visible"
-    whileHover={{ y: -4 }}
-  >
-    <div className="camera-header">
-      <Camera size={14} />
-      <span className="camera-id">{camera.id}</span>
-      <span className={`camera-status ${camera.status}`}>{camera.status}</span>
-    </div>
-    <div className="camera-preview">
-      <div className="camera-feed">
-        <Eye size={28} strokeWidth={1.5} />
-        <span>{camera.location}</span>
-      </div>
-    </div>
-    <div className="camera-info">
-      <span className="camera-name">{camera.name}</span>
-      <div className="camera-stats">
-        <span className="hazards-count">{camera.hazards} active</span>
-        <span className="last-update">{camera.lastUpdate}</span>
-      </div>
-    </div>
-  </motion.div>
-)
-
-const AlertItem = ({ alert, index }: { alert: Alert; index: number }) => (
-  <motion.div
-    className={`alert-item ${alert.severity} ${alert.acknowledged ? 'acknowledged' : ''}`}
-    custom={index}
-    variants={fadeIn}
-    initial="hidden"
-    animate="visible"
-  >
-    <div className="alert-icon">
-      {alert.severity === 'critical' ? <Zap size={16} /> : <Bell size={16} />}
-    </div>
-    <div className="alert-content">
-      <span className="alert-title">{alert.title}</span>
-      <span className="alert-message">{alert.message}</span>
-      <span className="alert-time">{alert.timestamp}</span>
-    </div>
-    {!alert.acknowledged && <button className="acknowledge-btn">Ack</button>}
-  </motion.div>
-)
-
-function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'cameras' | 'hazards' | 'history'>('dashboard')
-  const [selectedHazard, setSelectedHazard] = useState<Hazard | null>(null)
-  const [isPaused, setIsPaused] = useState(false)
-
-  const activeHazards = hazards.filter(h => h.status !== 'resolved').length
-  const criticalAlerts = alerts.filter(a => a.severity === 'critical' && !a.acknowledged).length
-  const onlineCameras = cameras.filter(c => c.status === 'online').length
-
-  const tabs = [
-    { key: 'dashboard' as const, icon: Activity, label: 'Dashboard' },
-    { key: 'cameras' as const, icon: Camera, label: 'Cameras' },
-    { key: 'hazards' as const, icon: AlertTriangle, label: 'Hazards' },
-    { key: 'history' as const, icon: Clock, label: 'History' },
+function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts }: {
+  page: Page
+  onNavigate: (p: Page) => void
+  alertsOpen: boolean
+  onToggleAlerts: () => void
+}) {
+  const navItems = [
+    { icon: Map, label: 'Live Map', id: 'map' as Page },
+    { icon: Bell, label: 'Alerts', id: 'alerts' as const },
+    { icon: Video, label: 'Cameras', id: 'cameras' as Page },
   ]
 
   return (
-    <div className="app">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="logo">
-          <Target size={26} strokeWidth={2.5} />
-          <span>RunwayWatcher</span>
+    <aside className="w-64 flex flex-col border-r border-slate-800 bg-[#101c22] shrink-0">
+      {/* Logo */}
+      <div className="p-6 flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <img src={runwayWatcherLogo} alt="RunwayWatcher" className="w-8 h-8" />
+          <h1 className="text-xl font-bold tracking-tight">RunwayWatcher</h1>
         </div>
-        <nav className="nav">
-          {tabs.map(tab => (
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-[0.15em]">Mission Control</p>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 px-4 py-4 space-y-2">
+        {navItems.map((item) => {
+          const isAlerts = item.id === 'alerts'
+          const isActive = isAlerts ? alertsOpen : page === item.id
+
+          return (
             <button
-              key={tab.key}
-              className={`nav-item ${activeTab === tab.key ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-              aria-label={tab.label}
+              key={item.label}
+              onClick={() => isAlerts ? onToggleAlerts() : onNavigate(item.id as Page)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                isActive
+                  ? 'bg-[#13a4ec]/10 text-[#13a4ec] border border-[#13a4ec]/20'
+                  : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 border border-transparent'
+              }`}
             >
-              <tab.icon size={20} />
-              <span>{tab.label}</span>
+              <item.icon size={20} />
+              <span className="text-sm font-semibold">{item.label}</span>
+              {isAlerts && alerts.length > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{alerts.length}</span>
+              )}
             </button>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <div className="system-status">
-            <div className="status-indicator online" />
-            <span>System Online</span>
+          )
+        })}
+      </nav>
+
+      {/* Footer */}
+      <div className="p-4 mt-auto">
+        <div className="bg-slate-900 rounded-xl p-4 border border-slate-800">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-400">STATUS</span>
+            <span className="flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+          </div>
+          <p className="text-xs text-slate-300 font-medium">AI Core: Optimized</p>
+          <div className="w-full bg-slate-800 h-1 mt-2 rounded-full overflow-hidden">
+            <div className="bg-[#13a4ec] h-full w-[85%]" />
           </div>
         </div>
-      </aside>
+        <button className="w-full mt-4 flex items-center justify-center gap-2 bg-[#13a4ec] hover:bg-[#13a4ec]/90 text-white py-2.5 rounded-lg text-sm font-bold transition-all shadow-lg shadow-[#13a4ec]/20">
+          <Zap size={14} />
+          SYSTEM ONLINE
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+function AlertCard({ alert }: { alert: Alert }) {
+  const colors = severityColors[alert.severity]
+  return (
+    <div className={`p-4 rounded-xl ${colors.bg} ${colors.border} border flex flex-col gap-4`}>
+      <div className="flex justify-between items-start">
+        <div className="flex flex-col gap-1">
+          <span className={`text-[10px] font-bold ${colors.text} uppercase tracking-widest`}>{alert.label}</span>
+          <h3 className="text-sm font-bold text-slate-100">{alert.title}</h3>
+        </div>
+        <div className={`${colors.scoreBg} px-2 py-1 rounded`}>
+          <span className={`text-xs font-bold ${colors.text}`}>{alert.score}/100</span>
+        </div>
+      </div>
+
+      {alert.imageUrl && (
+        <div className="aspect-video w-full rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900">
+          <img src={alert.imageUrl} alt={alert.title} className="w-full h-full object-cover" />
+        </div>
+      )}
+
+      {alert.description && !alert.imageUrl && (
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+            <span className={`material-symbols-outlined ${colors.text}`}>
+              {alert.severity === 'high' ? 'nest_multi_room' : 'warning'}
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-400 leading-tight">{alert.description}</p>
+        </div>
+      )}
+
+      {alert.description && alert.severity === 'info' && (
+        <p className="text-xs text-slate-400 leading-normal">{alert.description}</p>
+      )}
+
+      <div className="flex gap-2">
+        {alert.severity === 'critical' ? (
+          <>
+            <button className="flex-1 py-2 bg-red-500 text-white text-xs font-bold rounded-lg hover:bg-red-600 transition-colors">
+              {alert.actionLabel}
+            </button>
+            <button className="p-2 border border-slate-700 text-slate-400 rounded-lg hover:text-slate-100 transition-colors">
+              <Eye size={14} />
+            </button>
+          </>
+        ) : alert.severity === 'high' ? (
+          <button className="w-full py-2 bg-slate-800 text-slate-100 text-xs font-bold rounded-lg hover:bg-slate-700 transition-colors">
+            {alert.actionLabel}
+          </button>
+        ) : (
+          <button className="w-full py-2 border border-slate-700 text-slate-300 text-xs font-bold rounded-lg hover:bg-slate-800 transition-colors">
+            {alert.actionLabel}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RightSidebar() {
+  return (
+    <aside className="w-80 flex flex-col border-l border-slate-800 bg-[#101c22] shrink-0">
+      <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+        <h2 className="text-sm font-bold text-slate-100 tracking-wider">CRITICAL ALERTS</h2>
+        <MoreVertical size={16} className="text-slate-500" />
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {alerts.map((alert) => (
+          <AlertCard key={alert.id} alert={alert} />
+        ))}
+      </div>
+
+      {/* Footer Stats */}
+      <div className="p-4 border-t border-slate-800 bg-[#101c22]/50">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-2 rounded-lg bg-slate-900/50 border border-slate-800">
+            <p className="text-[10px] font-bold text-slate-500 mb-1">SCAN RATE</p>
+            <p className="text-lg font-bold text-[#13a4ec]">1.2ms</p>
+          </div>
+          <div className="p-2 rounded-lg bg-slate-900/50 border border-slate-800">
+            <p className="text-[10px] font-bold text-slate-500 mb-1">OBJECTS</p>
+            <p className="text-lg font-bold text-slate-100">142</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function CameraStrip() {
+  return (
+    <div className="h-44 bg-[#101c22] border-t border-slate-800 p-4 flex gap-4 overflow-x-auto shrink-0">
+      {cameraFeeds.slice(0, 4).map((cam) => (
+        <div key={cam.id} className="flex-none w-64 group relative overflow-hidden rounded-lg border border-slate-700">
+          <div className="absolute top-2 left-2 z-10 flex items-center gap-2 bg-black/60 px-2 py-1 rounded text-[10px] font-bold text-white">
+            <span className={`w-1.5 h-1.5 rounded-full ${cam.status === 'recording' ? 'bg-red-600' : 'bg-emerald-600'}`} />
+            {cam.id} ({cam.name})
+          </div>
+          <img
+            src={cam.imageUrl}
+            alt={`${cam.id} - ${cam.name}`}
+            className="h-full w-full object-cover transition-transform group-hover:scale-110"
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CamerasPage() {
+  return (
+    <div className="flex-1 flex flex-col bg-[#0c1419] overflow-hidden">
+      {/* Header */}
+      <div className="p-6 border-b border-slate-800 bg-[#101c22]">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-100 tracking-wide">CAMERA OVERVIEW</h2>
+            <p className="text-xs text-slate-400 mt-1">{cameraFeeds.length} cameras deployed · {cameraFeeds.filter(c => c.status === 'recording').length} recording</p>
+          </div>
+          <div className="flex gap-3">
+            {Object.entries(statusColors).map(([key, val]) => {
+              const count = cameraFeeds.filter(c => c.status === key).length
+              if (count === 0) return null
+              return (
+                <div key={key} className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${val.dot}`} />
+                  <span className={`text-xs font-bold ${val.text}`}>{count} {val.label}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Camera Grid */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+          {cameraFeeds.map((cam) => {
+            const status = statusColors[cam.status]
+            const isDisabled = cam.status === 'offline' || cam.status === 'maintenance'
+            return (
+              <div key={cam.id} className={`group relative rounded-xl border overflow-hidden ${isDisabled ? 'border-slate-700/50 opacity-60' : 'border-slate-700 hover:border-[#13a4ec]/40'} transition-all`}>
+                {/* Feed */}
+                <div className="aspect-video relative bg-slate-900">
+                  <img
+                    src={cam.imageUrl}
+                    alt={`${cam.id} - ${cam.name}`}
+                    className={`w-full h-full object-cover ${isDisabled ? 'grayscale opacity-30' : 'group-hover:scale-105'} transition-transform`}
+                  />
+                  {/* Status badge */}
+                  <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/70 backdrop-blur-sm px-2.5 py-1 rounded-lg">
+                    <span className={`w-2 h-2 rounded-full ${status.dot} ${cam.status === 'recording' ? 'animate-pulse' : ''}`} />
+                    <span className="text-[10px] font-bold text-white">{status.label}</span>
+                  </div>
+                  {/* Scanline overlay for active feeds */}
+                  {!isDisabled && <div className="absolute inset-0 scanline pointer-events-none opacity-50" />}
+                </div>
+                {/* Info */}
+                <div className="p-3 bg-[#101c22] border-t border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-slate-100">{cam.id} — {cam.name}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">{cam.location}</p>
+                    </div>
+                    <Video size={14} className="text-slate-600" />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MapViewport() {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = React.useState(1)
+  const [pan, setPan] = React.useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = React.useState(false)
+  const dragStart = React.useRef({ x: 0, y: 0, panX: 0, panY: 0 })
+  const [fitted, setFitted] = React.useState(false)
+
+  const MAP_W = 2400
+  const MAP_H = 1200
+  const MIN_ZOOM = 0.3
+  const MAX_ZOOM = 2
+  const ZOOM_STEP = 0.05
+
+  // Fit-to-frame logic
+  const fitToFrame = React.useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    const scaleX = el.clientWidth / MAP_W
+    const scaleY = el.clientHeight / MAP_H
+    const fitScale = Math.min(scaleX, scaleY)
+    setZoom(fitScale)
+    setPan({ x: 0, y: 0 })
+    setFitted(true)
+  }, [])
+
+  // Fit-to-frame on mount and resize
+  React.useEffect(() => {
+    fitToFrame()
+    window.addEventListener('resize', fitToFrame)
+    return () => window.removeEventListener('resize', fitToFrame)
+  }, [fitToFrame])
+
+  const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
+
+  // Wheel zoom — zoom toward cursor position
+  const handleWheel = React.useCallback((e: WheelEvent) => {
+    e.preventDefault()
+    const el = containerRef.current
+    if (!el) return
+
+    const rect = el.getBoundingClientRect()
+    const cx = e.clientX - rect.left - rect.width / 2
+    const cy = e.clientY - rect.top - rect.height / 2
+
+    const direction = e.deltaY < 0 ? 1 : -1
+    const newZoom = clampZoom(zoom + direction * ZOOM_STEP * zoom)
+    const ratio = newZoom / zoom
+
+    setPan(prev => ({
+      x: cx - ratio * (cx - prev.x),
+      y: cy - ratio * (cy - prev.y),
+    }))
+    setZoom(newZoom)
+  }, [zoom])
+
+  React.useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [handleWheel])
+
+  const zoomTo = (direction: 1 | -1) => {
+    const newZoom = clampZoom(zoom + direction * ZOOM_STEP * zoom)
+    const ratio = newZoom / zoom
+    setPan(prev => ({ x: prev.x * ratio, y: prev.y * ratio }))
+    setZoom(newZoom)
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true)
+    dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }
+  }
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return
+    setPan({
+      x: dragStart.current.panX + (e.clientX - dragStart.current.x),
+      y: dragStart.current.panY + (e.clientY - dragStart.current.y),
+    })
+  }
+  const handleMouseUp = () => setIsDragging(false)
+
+  return (
+    <div className="flex-1 relative bg-slate-900 scanline overflow-hidden">
+      <div
+        ref={containerRef}
+        className={`absolute inset-0 overflow-hidden ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <div
+          className="absolute top-1/2 left-1/2"
+          style={{
+            width: MAP_W,
+            height: MAP_H,
+            transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: 'center center',
+            opacity: fitted ? 1 : 0,
+            transition: isDragging ? 'none' : 'opacity 0.3s',
+          }}
+        >
+          <img
+            src="/airport-apron.png"
+            alt="Airport apron"
+            className="absolute inset-0 w-full h-full object-cover opacity-50 grayscale contrast-125"
+            draggable={false}
+          />
+
+          {/* Drone hazard marker */}
+          <motion.div
+            className="absolute pointer-events-auto cursor-pointer"
+            style={{ top: 380, left: 580 }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="relative">
+              <div className="absolute -inset-14 bg-red-500/20 rounded-full animate-ping" />
+              <div className="relative bg-[#101c22] border-4 border-red-500 p-8 rounded-3xl flex items-center gap-5">
+                <span className="material-symbols-outlined text-red-500 text-6xl">drone</span>
+                <div className="text-2xl leading-tight font-bold">
+                  <p className="text-red-500">DRONE DETECTED</p>
+                  <p className="text-slate-300">SEC-04 | ALT 50ft</p>
+                </div>
+              </div>
+              <div className="h-36 w-2 bg-red-500/50 absolute top-full left-1/2 -translate-x-1/2" />
+            </div>
+          </motion.div>
+
+          {/* Bird hazard marker */}
+          <motion.div
+            className="absolute pointer-events-auto cursor-pointer"
+            style={{ top: 600, left: 1600 }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <div className="bg-[#101c22] border-4 border-amber-500 p-8 rounded-3xl flex items-center gap-5">
+              <span className="material-symbols-outlined text-amber-500 text-6xl">flutter_dash</span>
+              <div className="text-2xl leading-tight font-bold">
+                <p className="text-amber-500">BIRD STRIKE RISK</p>
+                <p className="text-slate-300">NORTH APPROACH</p>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* SVG movement paths */}
+          <svg className="absolute inset-0 w-full h-full opacity-30 pointer-events-none">
+            <path d="M200,900 L700,550 L1300,750" fill="none" stroke="#13a4ec" strokeDasharray="24 12" strokeWidth="12" />
+            <path d="M400,200 L1100,400 L1800,300" fill="none" stroke="#13a4ec" strokeDasharray="24 12" strokeWidth="12" />
+            <circle cx="1300" cy="750" r="20" fill="#13a4ec" />
+            <circle cx="1800" cy="300" r="20" fill="#13a4ec" />
+          </svg>
+        </div>
+      </div>
+
+      {/* Map Controls */}
+      <div className="absolute bottom-6 right-6 flex flex-row gap-1 z-10">
+        <button
+          onClick={() => zoomTo(1)}
+          className="bg-[#101c22]/80 backdrop-blur-md border border-slate-700/50 p-2 rounded-l-lg text-slate-300 hover:text-[#13a4ec] transition-colors"
+        >
+          <Plus size={18} />
+        </button>
+        <button
+          onClick={() => zoomTo(-1)}
+          className="bg-[#101c22]/80 backdrop-blur-md border border-slate-700/50 p-2 border-l-0 text-slate-300 hover:text-[#13a4ec] transition-colors"
+        >
+          <Minus size={18} />
+        </button>
+        <button
+          onClick={fitToFrame}
+          className="bg-[#101c22]/80 backdrop-blur-md border border-slate-700/50 p-2 rounded-r-lg border-l-0 text-slate-300 hover:text-[#13a4ec] transition-colors"
+        >
+          <Locate size={18} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function App() {
+  const [page, setPage] = React.useState<Page>('map')
+  const [alertsOpen, setAlertsOpen] = React.useState(true)
+
+  return (
+    <div className="flex h-screen w-full">
+      <Sidebar
+        page={page}
+        onNavigate={setPage}
+        alertsOpen={alertsOpen}
+        onToggleAlerts={() => setAlertsOpen(prev => !prev)}
+      />
 
       {/* Main Content */}
-      <main className="main-content">
-        <header className="header">
-          <div className="header-left">
-            <h1>Hazard Detection</h1>
-            <span className="airport-code">KJFK</span>
-          </div>
-          <div className="header-right">
-            <div className="live-indicator">
-              <span className="pulse" />
-              <span>Live</span>
-            </div>
-            <button className="control-btn" onClick={() => setIsPaused(!isPaused)} aria-label={isPaused ? 'Resume' : 'Pause'}>
-              {isPaused ? <Play size={16} /> : <Pause size={16} />}
-            </button>
-            <button className="control-btn" aria-label="Notifications">
-              <Bell size={16} />
-              {criticalAlerts > 0 && <span className="notification-badge">{criticalAlerts}</span>}
-            </button>
-            <div className="search-box">
-              <Search size={16} />
-              <input type="text" placeholder="Search..." aria-label="Search cameras and hazards" />
-            </div>
-          </div>
-        </header>
+      {page === 'map' ? (
+        <main className="flex-1 flex flex-col relative overflow-hidden bg-[#0c1419]">
+          <MapViewport />
+          <CameraStrip />
+        </main>
+      ) : (
+        <CamerasPage />
+      )}
 
-        <AnimatePresence mode="wait">
-          {/* Dashboard */}
-          {activeTab === 'dashboard' && (
-            <motion.div className="dashboard" key="dashboard" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
-              <div className="stats-row">
-                <StatCard icon={AlertTriangle} label="Active Hazards" value={activeHazards.toString()} trend="+3 today" trendUp index={0} />
-                <StatCard icon={Radio} label="Online Cameras" value={`${onlineCameras}/${cameras.length}`} index={1} />
-                <StatCard icon={Zap} label="Critical Alerts" value={criticalAlerts.toString()} trend="2 unresolved" trendUp={false} index={2} />
-                <StatCard icon={Shield} label="Risk Score" value="72" trend="−5 from avg" trendUp={false} index={3} />
-              </div>
-
-              <div className="dashboard-grid">
-                {/* Map */}
-                <motion.div className="card map-section" custom={4} variants={fadeIn} initial="hidden" animate="visible">
-                  <div className="card-header">
-                    <h2>Airport Overview</h2>
-                    <button className="filter-btn" aria-label="Filter map"><Filter size={16} /></button>
-                  </div>
-                  <div className="airport-map">
-                    <div className="runway runway-27l">RWY 27L</div>
-                    <div className="runway runway-27r">RWY 27R</div>
-                    <div className="taxiway taxiway-a">TWY A</div>
-                    <div className="taxiway taxiway-b">TWY B</div>
-                    <div className="apron north-apron">N. Apron</div>
-                    <div className="apron south-apron">S. Apron</div>
-                    <div className="apron cargo-apron">Cargo</div>
-                    <div className="terminal terminal-a">Term A</div>
-                    <div className="terminal terminal-b">Term B</div>
-                    <div className="hazard-marker critical" style={{ top: '20%', left: '30%' }} title="Drone — Critical">
-                      <AlertTriangle size={14} />
-                    </div>
-                    <div className="hazard-marker high" style={{ top: '35%', left: '25%' }} title="Bird — High">
-                      <AlertTriangle size={14} />
-                    </div>
-                    <div className="hazard-marker medium" style={{ top: '60%', left: '45%' }} title="Debris — Medium">
-                      <AlertTriangle size={14} />
-                    </div>
-                    <div className="hazard-marker high" style={{ top: '70%', left: '35%' }} title="Bird — High">
-                      <AlertTriangle size={14} />
-                    </div>
-                    <div className="camera-marker" style={{ top: '15%', left: '28%' }} title="CAM-001"><Camera size={13} /></div>
-                    <div className="camera-marker" style={{ top: '10%', left: '60%' }} title="CAM-002"><Camera size={13} /></div>
-                    <div className="camera-marker" style={{ top: '45%', left: '40%' }} title="CAM-003"><Camera size={13} /></div>
-                    <div className="camera-marker" style={{ top: '75%', left: '30%' }} title="CAM-004"><Camera size={13} /></div>
-                    <div className="camera-marker offline" style={{ top: '25%', left: '35%' }} title="CAM-005 (Offline)"><Camera size={13} /></div>
-                    <div className="camera-marker" style={{ top: '50%', left: '55%' }} title="CAM-006"><Camera size={13} /></div>
-                  </div>
-                </motion.div>
-
-                {/* Alerts */}
-                <motion.div className="card alerts-panel" custom={5} variants={fadeIn} initial="hidden" animate="visible">
-                  <div className="card-header">
-                    <h2>Alerts</h2>
-                    <button className="view-all-btn">All <ChevronRight size={14} /></button>
-                  </div>
-                  <div className="alerts-list">
-                    {alerts.map((alert, i) => <AlertItem key={alert.id} alert={alert} index={i} />)}
-                  </div>
-                </motion.div>
-
-                {/* Hazard Activity Chart */}
-                <motion.div className="card chart-card" custom={6} variants={fadeIn} initial="hidden" animate="visible">
-                  <div className="card-header">
-                    <h2>Hazard Activity (24h)</h2>
-                  </div>
-                  <ResponsiveContainer width="100%" height={190}>
-                    <AreaChart data={hourlyData}>
-                      <defs>
-                        <linearGradient id="gradBirds" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#34d399" stopOpacity={0.3} />
-                          <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="gradDrones" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
-                          <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
-                      <XAxis dataKey="hour" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Area type="monotone" dataKey="birds" stroke="#34d399" strokeWidth={2} fill="url(#gradBirds)" />
-                      <Area type="monotone" dataKey="drones" stroke="#f87171" strokeWidth={2} fill="url(#gradDrones)" />
-                      <Line type="monotone" dataKey="debris" stroke="#fbbf24" strokeWidth={2} dot={false} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <div className="chart-legend">
-                    <span className="legend-item"><span className="dot birds" /> Birds</span>
-                    <span className="legend-item"><span className="dot drones" /> Drones</span>
-                    <span className="legend-item"><span className="dot debris" /> Debris</span>
-                  </div>
-                </motion.div>
-
-                {/* Risk Score Chart */}
-                <motion.div className="card chart-card" custom={7} variants={fadeIn} initial="hidden" animate="visible">
-                  <div className="card-header">
-                    <h2>Risk Score Trend</h2>
-                  </div>
-                  <ResponsiveContainer width="100%" height={190}>
-                    <BarChart data={riskScoreData}>
-                      <defs>
-                        <linearGradient id="gradRisk" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#818cf8" stopOpacity={0.9} />
-                          <stop offset="100%" stopColor="#6366f1" stopOpacity={0.4} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
-                      <XAxis dataKey="time" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#475569" fontSize={11} domain={[0, 100]} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Bar dataKey="score" fill="url(#gradRisk)" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </motion.div>
-
-                {/* Active Hazards Table */}
-                <motion.div className="card hazards-panel" custom={8} variants={fadeIn} initial="hidden" animate="visible">
-                  <div className="card-header">
-                    <h2>Active Hazards</h2>
-                    <button className="view-all-btn" onClick={() => setActiveTab('hazards')}>All <ChevronRight size={14} /></button>
-                  </div>
-                  <div className="hazards-table">
-                    <div className="table-header">
-                      <span>Type</span>
-                      <span>Location</span>
-                      <span>Confidence</span>
-                      <span>Severity</span>
-                      <span>Status</span>
-                    </div>
-                    {hazards.slice(0, 5).map(hazard => (
-                      <div
-                        key={hazard.id}
-                        className={`table-row ${selectedHazard?.id === hazard.id ? 'selected' : ''}`}
-                        onClick={() => setSelectedHazard(hazard)}
-                      >
-                        <span className="hazard-type"><HazardTypeIcon type={hazard.type} /></span>
-                        <span className="hazard-location">{hazard.location}</span>
-                        <span className="hazard-confidence">{hazard.confidence}%</span>
-                        <SeverityBadge severity={hazard.severity} />
-                        <span className={`hazard-status ${hazard.status}`}>{hazard.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Cameras */}
-          {activeTab === 'cameras' && (
-            <motion.div className="cameras-view" key="cameras" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
-              <div className="cameras-header">
-                <h2>Camera Feeds</h2>
-                <div className="camera-filters">
-                  <button className="filter-chip active">All ({cameras.length})</button>
-                  <button className="filter-chip">Online ({onlineCameras})</button>
-                  <button className="filter-chip">Offline ({cameras.filter(c => c.status === 'offline').length})</button>
-                  <button className="filter-chip">Maintenance ({cameras.filter(c => c.status === 'maintenance').length})</button>
-                </div>
-              </div>
-              <div className="cameras-grid">
-                {cameras.map((camera, i) => <CameraCard key={camera.id} camera={camera} index={i} />)}
-              </div>
-            </motion.div>
-          )}
-
-          {/* Hazards */}
-          {activeTab === 'hazards' && (
-            <motion.div className="hazards-view" key="hazards" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
-              <div className="hazards-header">
-                <h2>All Hazards</h2>
-                <div className="hazard-filters">
-                  <select className="filter-select" aria-label="Filter by type">
-                    <option>All Types</option>
-                    <option>Birds</option>
-                    <option>Drones</option>
-                    <option>Debris</option>
-                    <option>Vehicles</option>
-                  </select>
-                  <select className="filter-select" aria-label="Filter by severity">
-                    <option>All Severities</option>
-                    <option>Critical</option>
-                    <option>High</option>
-                    <option>Medium</option>
-                    <option>Low</option>
-                  </select>
-                  <select className="filter-select" aria-label="Filter by status">
-                    <option>All Statuses</option>
-                    <option>Detected</option>
-                    <option>Tracking</option>
-                    <option>Resolved</option>
-                  </select>
-                </div>
-              </div>
-              <div className="hazards-list">
-                {hazards.map((hazard, i) => (
-                  <motion.div key={hazard.id} className="hazard-detail-card" custom={i} variants={fadeIn} initial="hidden" animate="visible">
-                    <div className="hazard-detail-header">
-                      <HazardTypeIcon type={hazard.type} />
-                      <div className="hazard-detail-info">
-                        <span className="hazard-id">{hazard.id}</span>
-                        <span className="hazard-camera">{hazard.camera} · {hazard.timestamp}</span>
-                      </div>
-                      <SeverityBadge severity={hazard.severity} />
-                    </div>
-                    <div className="hazard-detail-body">
-                      <div className="detail-row">
-                        <span className="detail-label">Location</span>
-                        <span className="detail-value">{hazard.location}</span>
-                      </div>
-                      <div className="detail-row">
-                        <span className="detail-label">Confidence</span>
-                        <span className="detail-value">{hazard.confidence}%</span>
-                      </div>
-                      <div className="detail-row">
-                        <span className="detail-label">Status</span>
-                        <span className={`detail-value status-${hazard.status}`}>{hazard.status}</span>
-                      </div>
-                    </div>
-                    <div className="hazard-detail-actions">
-                      <button className="action-btn primary">Track</button>
-                      <button className="action-btn secondary">View Feed</button>
-                      <button className="action-btn">Resolve</button>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-
-          {/* History */}
-          {activeTab === 'history' && (
-            <motion.div className="history-view" key="history" variants={pageTransition} initial="hidden" animate="visible" exit="exit">
-              <div className="history-header">
-                <h2>Historical Data</h2>
-                <div className="date-range">
-                  <input type="date" defaultValue="2026-02-15" aria-label="Start date" />
-                  <span>to</span>
-                  <input type="date" defaultValue="2026-02-15" aria-label="End date" />
-                </div>
-              </div>
-              <div className="history-stats">
-                {[
-                  { value: '247', label: 'Total Detections' },
-                  { value: '89%', label: 'Avg Confidence' },
-                  { value: '12', label: 'Critical Events' },
-                  { value: '4.2m', label: 'Avg Response' },
-                ].map((stat, i) => (
-                  <motion.div key={stat.label} className="history-stat" custom={i} variants={fadeIn} initial="hidden" animate="visible">
-                    <span className="history-stat-value">{stat.value}</span>
-                    <span className="history-stat-label">{stat.label}</span>
-                  </motion.div>
-                ))}
-              </div>
-              <motion.div className="history-chart" custom={4} variants={fadeIn} initial="hidden" animate="visible">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={hourlyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.06)" />
-                    <XAxis dataKey="hour" stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="birds" stackId="a" fill="#34d399" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="drones" stackId="a" fill="#f87171" />
-                    <Bar dataKey="debris" stackId="a" fill="#fbbf24" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
+      {alertsOpen && <RightSidebar />}
     </div>
   )
 }
