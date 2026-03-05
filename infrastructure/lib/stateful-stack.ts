@@ -7,10 +7,11 @@
  * This software is licensed under the GNU General Public License v3.0.
  */
 
-import { Stack, StackProps, Aspects } from 'aws-cdk-lib';
+import { Stack, StackProps, Aspects, Duration } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { AwsSolutionsChecks, NagSuppressions } from 'cdk-nag';
 import { Table, AttributeType, StreamViewType } from 'aws-cdk-lib/aws-dynamodb';
+import { Bucket, BlockPublicAccess, BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { EnvironmentConfig, Stage, getRemovalPolicyFromStage } from '@config';
 import { CustomTable } from '@constructs';
 
@@ -22,6 +23,7 @@ export interface RunwayWatcherStatefulStackProps extends StackProps {
 export class RunwayWatcherStatefulStack extends Stack {
   // Exports from this stack
   public readonly runwayWatcherTable: Table;
+  public readonly cameraImagesBucket: Bucket;
 
   constructor(scope: Construct, id: string, props: RunwayWatcherStatefulStackProps) {
     super(scope, id, props);
@@ -42,6 +44,21 @@ export class RunwayWatcherStatefulStack extends Stack {
       },
       stream: StreamViewType.NEW_AND_OLD_IMAGES,
     }).table;
+
+    // S3 bucket for camera images with 1-day lifecycle expiration
+    this.cameraImagesBucket = new Bucket(this, 'CameraImagesBucket', {
+      removalPolicy: getRemovalPolicyFromStage(stage),
+      autoDeleteObjects: stage !== Stage.prod,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      encryption: BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      eventBridgeEnabled: true,
+      lifecycleRules: [
+        {
+          expiration: Duration.days(1),
+        },
+      ],
+    });
 
     // cdk nag check and suppressions
     Aspects.of(this).add(new AwsSolutionsChecks({ verbose: true }));

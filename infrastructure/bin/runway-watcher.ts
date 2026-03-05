@@ -18,7 +18,9 @@ const statefulStack = new RunwayWatcherStatefulStack(app, 'RunwayWatcherStateful
 const statelessStack = new RunwayWatcherStatelessStack(app, 'RunwayWatcherStatelessStack', {
   stage: stage,
   envConfig: envConfig,
-  runwayWatcherTable: statefulStack.runwayWatcherTable
+  runwayWatcherTable: statefulStack.runwayWatcherTable,
+  cameraImagesBucketArn: statefulStack.cameraImagesBucket.bucketArn,
+  cameraImagesBucketName: statefulStack.cameraImagesBucket.bucketName,
 });
 
 new FrontendStack(app, 'RunwayWatcherFrontendStack', {

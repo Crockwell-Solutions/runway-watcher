@@ -33,13 +33,13 @@
 
 import * as path from 'path';
 import { Construct } from 'constructs';
-import { Duration } from 'aws-cdk-lib';
+import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import { NodejsFunction, NodejsFunctionProps } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Runtime, Tracing, Architecture, LoggingFormat, SystemLogLevel } from 'aws-cdk-lib/aws-lambda';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { projectRoot } from '@utils';
 import { EnvironmentConfig } from '@config';
-import { projectRoot } from '../utils';
 
 const lambdaPowerToolsConfig = {
   POWERTOOLS_LOGGER_LOG_EVENT: 'true',
@@ -47,7 +47,7 @@ const lambdaPowerToolsConfig = {
   POWERTOOLS_TRACE_ENABLED: 'enabled',
   POWERTOOLS_TRACER_CAPTURE_HTTPS_REQUESTS: 'captureHTTPsRequests',
   POWERTOOLS_TRACER_CAPTURE_RESPONSE: 'captureResult',
-  POWERTOOLS_METRICS_NAMESPACE: 'DroneDeliveryService',
+  POWERTOOLS_METRICS_NAMESPACE: 'RunwayWatcher',
 };
 
 const lambdaDefaultEnvironmentVariables = {
@@ -61,6 +61,7 @@ interface CustomLambdaProps extends NodejsFunctionProps {
   readonly environmentVariables?: object; // Additional environment variables to add to the function
   readonly policyStatements?: [PolicyStatement]; // The policy statements to add to the function
   readonly externalModules?: [string] | []; // Array of external modules to include explicitly
+  readonly copyDirectory?: string; // Optional folder reference to copy source files and bundle with the Lambda
 }
 
 // Default properties for the Lambda function
@@ -72,6 +73,7 @@ const defaultLambdaProps = {
 };
 
 export class CustomLambda extends Construct {
+  public readonly logGroup: LogGroup;
   public readonly lambda: NodejsFunction;
 
   constructor(scope: Construct, id: string, props: CustomLambdaProps) {
@@ -80,11 +82,17 @@ export class CustomLambda extends Construct {
     // Merge the default lambda props with the provided ones
     props = { ...defaultLambdaProps, ...props };
 
+    this.logGroup = new LogGroup(this, `${id}-LogGroup`, {
+      logGroupName: `/aws/lambda/${props.functionName ? props.functionName : id}`,
+      retention: RetentionDays.THREE_MONTHS,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
     this.lambda = new NodejsFunction(this, id, {
       functionName: props.functionName ? props.functionName : id, // If no function name is provided, use the lambda construct id
       memorySize: props.memorySize,
       timeout: props.timeout,
-      entry: path.join(projectRoot, props.source),
+      entry: path.join(projectRoot, '/..', props.source),
       environment: {
         REGION: props.envConfig.env.region,
         ...lambdaDefaultEnvironmentVariables,
@@ -96,7 +104,7 @@ export class CustomLambda extends Construct {
       runtime: Runtime.NODEJS_LATEST,
       architecture: Architecture.ARM_64,
       handler: props.handler,
-      logRetention: RetentionDays.THREE_MONTHS,
+      logGroup: this.logGroup,
       loggingFormat: LoggingFormat.JSON,
       systemLogLevelV2: props.envConfig.logLevel === 'DEBUG' ? SystemLogLevel.DEBUG : SystemLogLevel.WARN,
       tracing: Tracing.ACTIVE,
@@ -107,6 +115,21 @@ export class CustomLambda extends Construct {
           '--log-level': 'warning',
         },
         ...(props.externalModules && { externalModules: props.externalModules }),
+        ...(props.copyDirectory && {
+          commandHooks: {
+            beforeBundling() {
+              return [];
+            },
+            beforeInstall() {
+              return [];
+            },
+            afterBundling(inputDir: string, outputDir: string) {
+              return [
+                `cp -r ${inputDir}/${props.copyDirectory} ${outputDir}/files`
+              ];
+            }
+          }
+        })
       },
       ...(props.vpc && {
         vpc: props.vpc,

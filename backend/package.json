@@ -1,10 +1,14 @@
 {
   "name": "@runway-watcher/backend",
-  "private": true,
   "version": "1.0.0",
-  "scripts": {
-    "build": "tsc",
-    "test": "echo \"No tests yet\""
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.800.0",
+    "@aws-sdk/client-s3": "^3.800.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^22.0.0",
+    "typescript": "~5.9.3"
+  }
 }
