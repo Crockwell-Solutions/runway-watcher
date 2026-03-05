@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "commonjs",
+    "moduleResolution": "node",
     "lib": [
       "es2022"
     ],
@@ -24,7 +24,17 @@
     "typeRoots": [
       "./node_modules/@types",
       "../node_modules/@types"
-    ]
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "constructs": ["../node_modules/constructs"],
+      "@config/*": ["./config/*"],
+      "@config": ["./config/index.ts"],
+      "@constructs/*": ["./constructs/*"],
+      "@constructs": ["./constructs/index.ts"],
+      "@utils/*": ["./utils/*"],
+      "@utils": ["./utils/index.ts"]
+    }
   },
   "exclude": [
     "node_modules",

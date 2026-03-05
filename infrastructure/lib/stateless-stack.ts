@@ -1,14 +1,31 @@
+/*
+ * CDK Stack - Stateless Resources
+ *
+ * This CDK stack sets up the stateless backend resources for the Runway Watcher Project.
+ * This contains the APIs, Lambda functions and event driven resources
+ *
+ * This software is licensed under the GNU General Public License v3.0.
+ */
+
 import { Duration, Stack, StackProps, CfnOutput } from 'aws-cdk-lib/core';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { Construct } from 'constructs';
+import { EnvironmentConfig, Stage } from '@config';
+
+export interface RunwayWatcherStatelessStackProps extends StackProps {
+  stage: Stage;
+  envConfig: EnvironmentConfig;
+  runwayWatcherTable: dynamodb.Table;
+}
 
 export class RunwayWatcherStatelessStack extends Stack {
   public readonly apiUrl: string;
 
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props: RunwayWatcherStatelessStackProps) {
     super(scope, id, props);
 
     const queue = new sqs.Queue(this, 'RunwayWatcherQueue', {

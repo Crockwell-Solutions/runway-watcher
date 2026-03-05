@@ -17,9 +17,11 @@ import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
 import { execSync } from 'child_process';
 import * as path from 'path';
+import { EnvironmentConfig, Stage } from '@config';
 
 export interface FrontendStackProps extends StackProps {
-  /** The API Gateway URL from the stateless stack */
+  stage: Stage;
+  envConfig: EnvironmentConfig;
   apiUrl: string;
 }
 
