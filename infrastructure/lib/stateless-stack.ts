@@ -154,12 +154,28 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
 
+    // Lambda function to simulate a hazard by invoking the upload-images Lambda with {"type": "hazard"}
+    const simulateHazardLambda = new CustomLambda(this, 'SimulateHazardFunction', {
+      functionName: `simulate-hazard-${props.stage}`,
+      source: 'backend/simulate-hazard.ts',
+      envConfig: props.envConfig,
+      environmentVariables: {
+        UPLOAD_FUNCTION_NAME: uploadImagesLambda.lambda.functionName,
+      },
+    });
+
+    // Grant invoke permission on the upload-images Lambda
+    uploadImagesLambda.lambda.grantInvoke(simulateHazardLambda.lambda);
+
     // Add API endpoints
     const camerasResource = api.root.addResource('cameras');
     const latestResource = camerasResource.addResource('latest');
     latestResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestImagesLambda.lambda));
     const alertsResource = camerasResource.addResource('alerts');
     alertsResource.addMethod('GET', new apigateway.LambdaIntegration(getAlertsLambda.lambda));
+
+    const simulateResource = api.root.addResource('simulate-hazard');
+    simulateResource.addMethod('POST', new apigateway.LambdaIntegration(simulateHazardLambda.lambda));
 
     // Durable Lambda function for multi-step hazard analysis workflow
     const analyseHazardLambda = new CustomLambda(this, 'AnalyseHazardFunction', {

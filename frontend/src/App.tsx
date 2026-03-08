@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import {
   Map, Bell, Video,
   Plus, Minus,
-  Zap, MoreVertical, Eye, Locate, RefreshCw, X
+  Zap, MoreVertical, Eye, Locate, RefreshCw, X, AlertTriangle
 } from 'lucide-react'
 import runwayWatcherLogo from './assets/runway-watcher.svg'
 import { config } from './config'
@@ -262,12 +262,14 @@ const statusColors: Record<string, { dot: string; text: string; label: string }>
 
 // ── Components ──
 
-function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts }: {
+function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazard }: {
   page: Page
   onNavigate: (p: Page) => void
   alertsOpen: boolean
   onToggleAlerts: () => void
+  onSimulateHazard: () => Promise<boolean>
 }) {
+  const [hazardStatus, setHazardStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const navItems = [
     { icon: Map, label: 'Live Map', id: 'map' as Page },
     { icon: Bell, label: 'Alerts', id: 'alerts' as const },
@@ -313,6 +315,28 @@ function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts }: {
 
       {/* Footer */}
       <div className="p-4 mt-auto">
+        <button
+          onClick={async () => {
+            if (hazardStatus === 'sending') return
+            setHazardStatus('sending')
+            const ok = await onSimulateHazard()
+            setHazardStatus(ok ? 'sent' : 'error')
+            setTimeout(() => setHazardStatus('idle'), 2500)
+          }}
+          disabled={hazardStatus === 'sending'}
+          className={`w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${
+            hazardStatus === 'sending'
+              ? 'bg-red-600/50 text-white/70 cursor-wait'
+              : hazardStatus === 'sent'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                : hazardStatus === 'error'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20'
+                  : 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/20'
+          }`}
+        >
+          <AlertTriangle size={14} />
+          {hazardStatus === 'sending' ? 'TRIGGERING…' : hazardStatus === 'sent' ? 'HAZARD TRIGGERED' : hazardStatus === 'error' ? 'FAILED — RETRY?' : 'SIMULATE HAZARD'}
+        </button>
         <div className="bg-slate-900 rounded-xl p-4 border border-slate-800">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-slate-400">STATUS</span>
@@ -764,6 +788,18 @@ function App() {
   const { cameras, loading, refresh } = useCameraFeeds()
   const { cameraAlerts } = useCameraAlerts()
 
+  const simulateHazard = React.useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${config.apiUrl}simulate-hazard`, { method: 'POST' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      console.log('Hazard simulation triggered')
+      return true
+    } catch (err) {
+      console.error('Failed to simulate hazard', err)
+      return false
+    }
+  }, [])
+
   return (
     <div className="flex h-screen w-full">
       <Sidebar
@@ -771,6 +807,7 @@ function App() {
         onNavigate={setPage}
         alertsOpen={alertsOpen}
         onToggleAlerts={() => setAlertsOpen(prev => !prev)}
+        onSimulateHazard={simulateHazard}
       />
 
       {/* Main Content */}

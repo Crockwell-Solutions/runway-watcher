@@ -4,7 +4,6 @@ import * as path from 'path';
 
 const s3 = new S3Client({});
 const BUCKET_NAME = process.env.BUCKET_NAME!;
-const MODE = process.env.MODE ?? 'Deployed';
 
 /**
  * Configuration for each camera image source.
@@ -30,16 +29,40 @@ const CAMERA_IMAGE_CONFIG: CameraImageConfig[] = [
   { sourceFile: 'camera-3-debris.jpg', cameraId: 'camera-3', uploadChancePercent: 1, type: 'hazard' },
 ];
 
-export const handler = async (): Promise<void> => {
+interface UploadEvent {
+  type?: 'hazard';
+}
+
+export const handler = async (event?: UploadEvent): Promise<void> => {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(now.getUTCDate()).padStart(2, '0');
   const timestamp = now.toISOString().replace(/[:.]/g, '-');
 
-  const imagesDir = MODE === 'Local' ? path.join(__dirname, '..', 'resources', 'camera-images') : path.join(__dirname, 'files');
+  const imagesDir = path.join(__dirname, 'files');
 
-  // Group configs by camera so each camera uploads at most 1 image per run
+  // If triggered with {"type": "hazard"}, upload exactly one random hazard image
+  if (event?.type === 'hazard') {
+    const hazardConfigs = CAMERA_IMAGE_CONFIG.filter(c => c.type === 'hazard');
+    const selected = hazardConfigs[Math.floor(Math.random() * hazardConfigs.length)];
+
+    const key = `${selected.cameraId}/${yyyy}/${mm}/${dd}/${selected.cameraId}-${timestamp}.jpg`;
+    const filePath = path.join(imagesDir, selected.sourceFile);
+    const body = fs.readFileSync(filePath);
+
+    console.log(`Hazard trigger: uploading ${key} (source: ${selected.sourceFile})`);
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      Body: body,
+      ContentType: 'image/jpeg',
+    }));
+    console.log(`Successfully uploaded hazard image ${key}`);
+    return;
+  }
+
+  // Normal scheduled run: group by camera, upload at most 1 image per camera
   const configsByCamera = new Map<string, CameraImageConfig[]>();
   for (const config of CAMERA_IMAGE_CONFIG) {
     const group = configsByCamera.get(config.cameraId) ?? [];
@@ -50,7 +73,6 @@ export const handler = async (): Promise<void> => {
   const uploads: Promise<void>[] = [];
 
   for (const [cameraId, configs] of configsByCamera) {
-    // Sum all upload chances for this camera to decide whether to upload at all
     const totalChance = configs.reduce((sum, c) => sum + c.uploadChancePercent, 0);
     const roll = Math.random() * 100;
 
@@ -59,7 +81,6 @@ export const handler = async (): Promise<void> => {
       continue;
     }
 
-    // Pick one image weighted by uploadChancePercent
     let pick = Math.random() * totalChance;
     let selected = configs[0];
     for (const config of configs) {
