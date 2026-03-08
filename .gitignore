@@ -15,6 +15,7 @@ infrastructure/**/*.d.ts
 # Environment
 *.local
 .env
+local.env.json
 
 # Editor directories and files
 .idea

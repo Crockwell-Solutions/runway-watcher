@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import {
   Map, Bell, Video,
   Plus, Minus,
-  Zap, MoreVertical, Eye, Locate, RefreshCw, X, AlertTriangle
+  Zap, MoreVertical, Eye, Locate, RefreshCw, X, AlertTriangle, Play
 } from 'lucide-react'
 import runwayWatcherLogo from './assets/runway-watcher.svg'
 import { config } from './config'
@@ -262,14 +262,16 @@ const statusColors: Record<string, { dot: string; text: string; label: string }>
 
 // ── Components ──
 
-function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazard }: {
+function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazard, onInitiateFeeds }: {
   page: Page
   onNavigate: (p: Page) => void
   alertsOpen: boolean
   onToggleAlerts: () => void
   onSimulateHazard: () => Promise<boolean>
+  onInitiateFeeds: () => Promise<boolean>
 }) {
   const [hazardStatus, setHazardStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [initiateStatus, setInitiateStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const navItems = [
     { icon: Map, label: 'Live Map', id: 'map' as Page },
     { icon: Bell, label: 'Alerts', id: 'alerts' as const },
@@ -315,6 +317,28 @@ function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazar
 
       {/* Footer */}
       <div className="p-4 mt-auto">
+        <button
+          onClick={async () => {
+            if (initiateStatus === 'sending') return
+            setInitiateStatus('sending')
+            const ok = await onInitiateFeeds()
+            setInitiateStatus(ok ? 'sent' : 'error')
+            setTimeout(() => setInitiateStatus('idle'), 2500)
+          }}
+          disabled={initiateStatus === 'sending'}
+          className={`w-full mb-2 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${
+            initiateStatus === 'sending'
+              ? 'bg-[#13a4ec]/50 text-white/70 cursor-wait'
+              : initiateStatus === 'sent'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                : initiateStatus === 'error'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20'
+                  : 'bg-[#13a4ec] hover:bg-[#13a4ec]/90 text-white shadow-lg shadow-[#13a4ec]/20'
+          }`}
+        >
+          <Play size={14} />
+          {initiateStatus === 'sending' ? 'INITIATING…' : initiateStatus === 'sent' ? 'FEEDS INITIATED' : initiateStatus === 'error' ? 'FAILED — RETRY?' : 'INITIATE / CLEAR FEEDS'}
+        </button>
         <button
           onClick={async () => {
             if (hazardStatus === 'sending') return
@@ -800,6 +824,18 @@ function App() {
     }
   }, [])
 
+  const initiateFeeds = React.useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${config.apiUrl}initiate-feeds`, { method: 'POST' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      console.log('Feed initiation triggered')
+      return true
+    } catch (err) {
+      console.error('Failed to initiate feeds', err)
+      return false
+    }
+  }, [])
+
   return (
     <div className="flex h-screen w-full">
       <Sidebar
@@ -808,6 +844,7 @@ function App() {
         alertsOpen={alertsOpen}
         onToggleAlerts={() => setAlertsOpen(prev => !prev)}
         onSimulateHazard={simulateHazard}
+        onInitiateFeeds={initiateFeeds}
       />
 
       {/* Main Content */}

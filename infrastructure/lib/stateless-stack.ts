@@ -154,6 +154,17 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
 
+    // Lambda function to initiate/clear feeds by uploading normal images for all cameras
+    const initiateFeedsLambda = new CustomLambda(this, 'InitiateFeedsFunction', {
+      functionName: `initiate-feeds-${props.stage}`,
+      source: 'backend/initiate-feeds.ts',
+      envConfig: props.envConfig,
+      environmentVariables: {
+        UPLOAD_FUNCTION_NAME: uploadImagesLambda.lambda.functionName,
+      },
+    });
+    uploadImagesLambda.lambda.grantInvoke(initiateFeedsLambda.lambda);
+
     // Lambda function to simulate a hazard by invoking the upload-images Lambda with {"type": "hazard"}
     const simulateHazardLambda = new CustomLambda(this, 'SimulateHazardFunction', {
       functionName: `simulate-hazard-${props.stage}`,
@@ -163,8 +174,6 @@ export class RunwayWatcherStatelessStack extends Stack {
         UPLOAD_FUNCTION_NAME: uploadImagesLambda.lambda.functionName,
       },
     });
-
-    // Grant invoke permission on the upload-images Lambda
     uploadImagesLambda.lambda.grantInvoke(simulateHazardLambda.lambda);
 
     // Add API endpoints
@@ -173,9 +182,10 @@ export class RunwayWatcherStatelessStack extends Stack {
     latestResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestImagesLambda.lambda));
     const alertsResource = camerasResource.addResource('alerts');
     alertsResource.addMethod('GET', new apigateway.LambdaIntegration(getAlertsLambda.lambda));
-
     const simulateResource = api.root.addResource('simulate-hazard');
     simulateResource.addMethod('POST', new apigateway.LambdaIntegration(simulateHazardLambda.lambda));
+    const initiateResource = api.root.addResource('initiate-feeds');
+    initiateResource.addMethod('POST', new apigateway.LambdaIntegration(initiateFeedsLambda.lambda));
 
     // Durable Lambda function for multi-step hazard analysis workflow
     const analyseHazardLambda = new CustomLambda(this, 'AnalyseHazardFunction', {

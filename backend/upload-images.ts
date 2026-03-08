@@ -30,7 +30,7 @@ const CAMERA_IMAGE_CONFIG: CameraImageConfig[] = [
 ];
 
 interface UploadEvent {
-  type?: 'hazard';
+  type?: 'hazard' | 'initiate';
 }
 
 export const handler = async (event?: UploadEvent): Promise<void> => {
@@ -59,6 +59,37 @@ export const handler = async (event?: UploadEvent): Promise<void> => {
       ContentType: 'image/jpeg',
     }));
     console.log(`Successfully uploaded hazard image ${key}`);
+    return;
+  }
+
+  // If triggered with {"type": "initiate"}, upload the first normal image for every camera
+  if (event?.type === 'initiate') {
+    const seen = new Set<string>();
+    const initiateUploads: Promise<void>[] = [];
+
+    for (const config of CAMERA_IMAGE_CONFIG) {
+      if (config.type !== 'normal' || seen.has(config.cameraId)) continue;
+      seen.add(config.cameraId);
+
+      const key = `${config.cameraId}/${yyyy}/${mm}/${dd}/${config.cameraId}-${timestamp}.jpg`;
+      const filePath = path.join(imagesDir, config.sourceFile);
+      const body = fs.readFileSync(filePath);
+
+      console.log(`Initiate: uploading ${key} (source: ${config.sourceFile})`);
+      initiateUploads.push(
+        s3.send(new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          Body: body,
+          ContentType: 'image/jpeg',
+        })).then(() => {
+          console.log(`Successfully uploaded ${key}`);
+        }),
+      );
+    }
+
+    await Promise.all(initiateUploads);
+    console.log(`Initiate complete. ${initiateUploads.length} image(s) uploaded.`);
     return;
   }
 
