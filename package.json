@@ -15,6 +15,8 @@
     "lint": "npm run lint -w frontend",
     "synth": "npm run synth -w infrastructure",
     "deploy": "npm run deploy -w infrastructure",
+    "deploy:backend": "npm run deploy:backend -w infrastructure",
+    "deploy:frontend": "npm run deploy:frontend -w infrastructure",
     "test:infra": "npm run test -w infrastructure",
     "cdk": "npm run cdk -w infrastructure --"
   }

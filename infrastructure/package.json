@@ -6,6 +6,8 @@
   },
   "scripts": {
     "deploy": "cdk deploy --all --require-approval never",
+    "deploy:backend": "cdk deploy RunwayWatcherStatelessStack --exclusively --require-approval never",
+    "deploy:frontend": "cdk deploy RunwayWatcherFrontendStack --exclusively --require-approval never",
     "synth": "cdk synth",
     "build": "tsc",
     "clean": "tsc --build --clean",
