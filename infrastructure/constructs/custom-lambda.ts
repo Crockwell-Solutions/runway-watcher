@@ -131,6 +131,7 @@ export class CustomLambda extends Construct {
           }
         })
       },
+      ...(props.durableConfig && { durableConfig: props.durableConfig }),
       ...(props.vpc && {
         vpc: props.vpc,
         vpcSubnets: props.vpcSubnets,

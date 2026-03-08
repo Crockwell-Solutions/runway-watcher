@@ -109,7 +109,7 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
       await ddb.send(new PutItemCommand({
         TableName: TABLE_NAME,
         Item: {
-          PK: { S: `ALERT#${cameraId}` },
+          PK: { S: 'ALERT' },
           SK: { S: now },
           CameraId: { S: cameraId },
           HazardType: { S: hazardType },

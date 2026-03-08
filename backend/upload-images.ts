@@ -31,9 +31,31 @@ const CAMERA_IMAGE_CONFIG: CameraImageConfig[] = [
 
 interface UploadEvent {
   type?: 'hazard' | 'initiate';
+  body?: string;
+  httpMethod?: string;
 }
 
-export const handler = async (event?: UploadEvent): Promise<void> => {
+interface ApiResponse {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+const corsHeaders = { 'Access-Control-Allow-Origin': '*' };
+
+export const handler = async (event?: UploadEvent): Promise<void | ApiResponse> => {
+  const isApiRequest = !!event?.httpMethod;
+
+  // If called via API Gateway, parse the type from the POST body
+  let effectiveType = event?.type;
+  if (isApiRequest && event?.body) {
+    try {
+      const parsed = JSON.parse(event.body);
+      effectiveType = parsed.type;
+    } catch {
+      return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Invalid JSON body' }) };
+    }
+  }
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
@@ -43,7 +65,7 @@ export const handler = async (event?: UploadEvent): Promise<void> => {
   const imagesDir = path.join(__dirname, 'files');
 
   // If triggered with {"type": "hazard"}, upload exactly one random hazard image
-  if (event?.type === 'hazard') {
+  if (effectiveType === 'hazard') {
     const hazardConfigs = CAMERA_IMAGE_CONFIG.filter(c => c.type === 'hazard');
     const selected = hazardConfigs[Math.floor(Math.random() * hazardConfigs.length)];
 
@@ -59,11 +81,12 @@ export const handler = async (event?: UploadEvent): Promise<void> => {
       ContentType: 'image/jpeg',
     }));
     console.log(`Successfully uploaded hazard image ${key}`);
+    if (isApiRequest) return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ message: 'Hazard simulation triggered' }) };
     return;
   }
 
   // If triggered with {"type": "initiate"}, upload the first normal image for every camera
-  if (event?.type === 'initiate') {
+  if (effectiveType === 'initiate') {
     const seen = new Set<string>();
     const initiateUploads: Promise<void>[] = [];
 
@@ -90,6 +113,7 @@ export const handler = async (event?: UploadEvent): Promise<void> => {
 
     await Promise.all(initiateUploads);
     console.log(`Initiate complete. ${initiateUploads.length} image(s) uploaded.`);
+    if (isApiRequest) return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ message: 'Feed initiation triggered' }) };
     return;
   }
 

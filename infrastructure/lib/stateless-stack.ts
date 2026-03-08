@@ -81,7 +81,7 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     // Lambda function to upload camera images to S3 on a schedule
     const uploadImagesLambda = new CustomLambda(this, 'UploadImagesFunction', {
-      functionName: 'UploadCameraImagesFunction',
+      functionName: `upload-camera-images-${props.stage}`,
       source: 'backend/upload-images.ts',
       envConfig: props.envConfig,
       environmentVariables: {
@@ -154,27 +154,7 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
 
-    // Lambda function to initiate/clear feeds by uploading normal images for all cameras
-    const initiateFeedsLambda = new CustomLambda(this, 'InitiateFeedsFunction', {
-      functionName: `initiate-feeds-${props.stage}`,
-      source: 'backend/initiate-feeds.ts',
-      envConfig: props.envConfig,
-      environmentVariables: {
-        UPLOAD_FUNCTION_NAME: uploadImagesLambda.lambda.functionName,
-      },
-    });
-    uploadImagesLambda.lambda.grantInvoke(initiateFeedsLambda.lambda);
 
-    // Lambda function to simulate a hazard by invoking the upload-images Lambda with {"type": "hazard"}
-    const simulateHazardLambda = new CustomLambda(this, 'SimulateHazardFunction', {
-      functionName: `simulate-hazard-${props.stage}`,
-      source: 'backend/simulate-hazard.ts',
-      envConfig: props.envConfig,
-      environmentVariables: {
-        UPLOAD_FUNCTION_NAME: uploadImagesLambda.lambda.functionName,
-      },
-    });
-    uploadImagesLambda.lambda.grantInvoke(simulateHazardLambda.lambda);
 
     // Add API endpoints
     const camerasResource = api.root.addResource('cameras');
@@ -183,13 +163,13 @@ export class RunwayWatcherStatelessStack extends Stack {
     const alertsResource = camerasResource.addResource('alerts');
     alertsResource.addMethod('GET', new apigateway.LambdaIntegration(getAlertsLambda.lambda));
     const simulateResource = api.root.addResource('simulate-hazard');
-    simulateResource.addMethod('POST', new apigateway.LambdaIntegration(simulateHazardLambda.lambda));
+    simulateResource.addMethod('POST', new apigateway.LambdaIntegration(uploadImagesLambda.lambda));
     const initiateResource = api.root.addResource('initiate-feeds');
-    initiateResource.addMethod('POST', new apigateway.LambdaIntegration(initiateFeedsLambda.lambda));
+    initiateResource.addMethod('POST', new apigateway.LambdaIntegration(uploadImagesLambda.lambda));
 
     // Durable Lambda function for multi-step hazard analysis workflow
-    const analyseHazardLambda = new CustomLambda(this, 'AnalyseHazardFunction', {
-      functionName: `analyse-hazard-${props.stage}`,
+    const analyseHazardLambda = new CustomLambda(this, 'AnalyseHazardDurableFunction', {
+      functionName: `analyse-hazard-durable-${props.stage}`,
       source: 'backend/analyse-hazard.ts',
       envConfig: props.envConfig,
       timeout: Duration.seconds(900),
@@ -198,7 +178,7 @@ export class RunwayWatcherStatelessStack extends Stack {
         BUCKET_NAME: props.cameraImagesBucketName,
       },
       durableConfig: {
-        executionTimeout: Duration.hours(1),
+        executionTimeout: Duration.minutes(10),
         retentionPeriod: Duration.days(7),
       },
     });
@@ -224,13 +204,15 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     // Create a version and alias (durable functions require qualified ARN invocation)
     const analyseHazardVersion = analyseHazardLambda.lambda.currentVersion;
-    new lambda.Alias(this, 'AnalyseHazardAlias', {
+    const analyseHazardAlias = new lambda.Alias(this, 'AnalyseHazardAlias', {
       aliasName: 'live',
       version: analyseHazardVersion,
     });
 
     // Trigger from DynamoDB Streams on NEW/MODIFIED records where PK = 'LATEST'
-    analyseHazardLambda.lambda.addEventSource(
+    // IMPORTANT: Bind to the alias, not the base function — durable functions
+    // require invocation via a qualified ARN to receive the durable execution envelope.
+    analyseHazardAlias.addEventSource(
       new DynamoEventSource(props.runwayWatcherTable, {
         startingPosition: StartingPosition.LATEST,
         batchSize: 1,

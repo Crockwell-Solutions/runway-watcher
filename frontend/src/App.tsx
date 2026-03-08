@@ -814,7 +814,11 @@ function App() {
 
   const simulateHazard = React.useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch(`${config.apiUrl}simulate-hazard`, { method: 'POST' })
+      const res = await fetch(`${config.apiUrl}simulate-hazard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'hazard' }),
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       console.log('Hazard simulation triggered')
       return true
@@ -826,7 +830,11 @@ function App() {
 
   const initiateFeeds = React.useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch(`${config.apiUrl}initiate-feeds`, { method: 'POST' })
+      const res = await fetch(`${config.apiUrl}initiate-feeds`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'initiate' }),
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       console.log('Feed initiation triggered')
       return true
