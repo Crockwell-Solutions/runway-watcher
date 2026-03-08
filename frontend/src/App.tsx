@@ -1,9 +1,9 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 import {
-  Map, Bell, Video,
+  Map, Video, Bell,
   Plus, Minus,
-  Zap, MoreVertical, Eye, Locate, RefreshCw, X, AlertTriangle, Play
+  Locate, RefreshCw, X, AlertTriangle, Play, PanelRightClose, PanelRightOpen
 } from 'lucide-react'
 import runwayWatcherLogo from './assets/runway-watcher.svg'
 import { config } from './config'
@@ -17,10 +17,12 @@ interface Alert {
   title: string
   severity: 'critical' | 'high' | 'info'
   label: string
-  score: number
   description: string
   imageUrl?: string
-  actionLabel: string
+  cameraId?: string
+  hazardType?: string
+  detectedAt?: string
+  processingTime?: number
 }
 
 interface CameraFeed {
@@ -86,11 +88,14 @@ function useCameraFeeds() {
 interface CameraAlert {
   id?: string
   cameraId?: string
-  type?: string
+  hazardType?: string
   severity?: string
-  alertLevel?: string
-  confidence?: number
-  timestamp?: string
+  description?: string
+  imageKey?: string
+  imageUrl?: string
+  detectedAt?: string
+  processedAt?: string
+  processingTime?: number
 }
 
 // ── Hook to fetch camera alerts from the API ──
@@ -110,11 +115,115 @@ function useCameraAlerts() {
 
   React.useEffect(() => {
     fetchAlerts()
-    const interval = setInterval(fetchAlerts, 15_000)
+    const interval = setInterval(fetchAlerts, 60_000)
     return () => clearInterval(interval)
   }, [fetchAlerts])
 
-  return { cameraAlerts }
+  return { cameraAlerts, refreshAlerts: fetchAlerts }
+}
+
+// ── WebSocket subscription hook for AppSync Events ──
+function useWebSocket({ url, apiKey, httpDomain, onMessage, enabled }: {
+  url: string
+  apiKey: string
+  httpDomain: string
+  onMessage: () => void
+  enabled: boolean
+}) {
+  const [isConnected, setIsConnected] = React.useState(false)
+  const onMessageRef = React.useRef(onMessage)
+
+  React.useEffect(() => {
+    onMessageRef.current = onMessage
+  }, [onMessage])
+
+  React.useEffect(() => {
+    if (!enabled) return
+
+    // Derive the realtime WebSocket URL from the HTTP domain
+    const realtimeHost = httpDomain.replace('appsync-api', 'appsync-realtime-api')
+    const wsUrl = `wss://${realtimeHost}/event/realtime`
+
+    // Build the auth header for the WebSocket subprotocol
+    const authObj = { host: httpDomain, 'x-api-key': apiKey }
+    const encoded = btoa(JSON.stringify(authObj))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+
+    let ws: WebSocket | null = null
+    let kaTimeout: ReturnType<typeof setTimeout> | null = null
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+    let disposed = false
+
+    function connect() {
+      if (disposed) return
+      ws = new WebSocket(wsUrl, [`header-${encoded}`, 'aws-appsync-event-ws'])
+
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({ type: 'connection_init' }))
+      }
+
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data)
+
+        if (msg.type === 'connection_ack') {
+          setIsConnected(true)
+          const timeoutMs = msg.connectionTimeoutMs ?? 300_000
+          resetKaTimer(timeoutMs)
+
+          ws?.send(JSON.stringify({
+            type: 'subscribe',
+            id: 'alerts-sub',
+            channel: '/alerts/*',
+            authorization: { 'x-api-key': apiKey, host: httpDomain },
+          }))
+        }
+
+        if (msg.type === 'ka') {
+          resetKaTimer(300_000)
+        }
+
+        if (msg.type === 'data') {
+          console.log('AppSync event received, refreshing data')
+          onMessageRef.current()
+        }
+      }
+
+      ws.onclose = () => {
+        setIsConnected(false)
+        if (!disposed) {
+          reconnectTimeout = setTimeout(connect, 3000)
+        }
+      }
+
+      ws.onerror = () => {
+        if (!disposed) ws?.close()
+      }
+    }
+
+    function resetKaTimer(timeoutMs: number) {
+      if (kaTimeout) clearTimeout(kaTimeout)
+      kaTimeout = setTimeout(() => {
+        ws?.close()
+      }, timeoutMs + 5000)
+    }
+
+    connect()
+
+    return () => {
+      disposed = true
+      setIsConnected(false)
+      if (kaTimeout) clearTimeout(kaTimeout)
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      if (ws) {
+        ws.onclose = null
+        ws.close()
+      }
+    }
+  }, [enabled, url, apiKey, httpDomain])
+
+  return { isConnected }
 }
 
 // ── Camera positions on the map (2400x1200 canvas) ──
@@ -134,15 +243,15 @@ const alertTypeIcons: Record<string, string> = {
 
 function getAlertLevel(cameraAlerts: CameraAlert[], cameraId: string): 'normal' | 'warning' | 'alert' {
   const camAlerts = cameraAlerts.filter(a => a.cameraId === cameraId)
-  if (camAlerts.some(a => a.alertLevel === 'alert')) return 'alert'
-  if (camAlerts.some(a => a.alertLevel === 'warning')) return 'warning'
+  if (camAlerts.some(a => a.severity === 'critical')) return 'alert'
+  if (camAlerts.some(a => a.severity === 'high')) return 'warning'
   return 'normal'
 }
 
 function getAlertDetails(cameraAlerts: CameraAlert[], cameraId: string): CameraAlert | undefined {
   // Return the highest-priority alert for this camera
-  return cameraAlerts.find(a => a.cameraId === cameraId && a.alertLevel === 'alert')
-    ?? cameraAlerts.find(a => a.cameraId === cameraId && a.alertLevel === 'warning')
+  return cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'critical')
+    ?? cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'high')
 }
 
 function CameraMapMarker({ cameraId, position, cameraAlerts, onSelect }: {
@@ -162,11 +271,11 @@ function CameraMapMarker({ cameraId, position, cameraAlerts, onSelect }: {
 
   const icon = level === 'normal'
     ? 'videocam'
-    : alertTypeIcons[detail?.type ?? ''] ?? 'warning'
+    : alertTypeIcons[detail?.hazardType ?? ''] ?? 'warning'
 
   const label = level === 'normal'
     ? position.label
-    : `${(detail?.type ?? 'ALERT').toUpperCase()} DETECTED`
+    : `${(detail?.hazardType ?? 'ALERT').toUpperCase()} DETECTED`
 
   const sublabel = level === 'normal'
     ? 'ALL CLEAR'
@@ -214,37 +323,31 @@ function CameraMapMarker({ cameraId, position, cameraAlerts, onSelect }: {
   )
 }
 
-// ── Dummy Data ──
-const alerts: Alert[] = [
-  {
-    id: 'ALT-001',
-    title: 'Drone Sighted Sector 4',
-    severity: 'critical',
-    label: 'CRITICAL',
-    score: 92,
-    description: '',
-    imageUrl: 'https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=400&h=250&fit=crop',
-    actionLabel: 'TAKE ACTION',
-  },
-  {
-    id: 'ALT-002',
-    title: 'Bird Strike - North',
-    severity: 'high',
-    label: 'HIGH RISK',
-    score: 78,
-    description: 'Increased activity detected on North approach Glide Path.',
-    actionLabel: 'NOTIFY GROUND CREW',
-  },
-  {
-    id: 'ALT-003',
-    title: 'FOD Detected Taxiway B',
-    severity: 'info',
-    label: 'INFO',
-    score: 45,
-    description: 'Small metallic debris identified by automated sweeps. Priority: Routine.',
-    actionLabel: 'ACKNOWLEDGE',
-  },
-]
+// ── Map CameraAlert from API to display Alert ──
+const hazardTitles: Record<string, string> = {
+  bird: 'Bird Detected',
+  drone: 'Drone Sighted',
+  vehicle: 'Vehicle on Runway',
+  debris: 'FOD / Debris Detected',
+  unknown: 'Unknown Hazard',
+}
+
+function toDisplayAlert(ca: CameraAlert): Alert {
+  const sev = (ca.severity === 'critical' || ca.severity === 'high' || ca.severity === 'info') ? ca.severity : 'info'
+  const camLabel = ca.cameraId?.replace('camera-', 'Camera ') ?? 'Unknown'
+  return {
+    id: ca.id ?? crypto.randomUUID(),
+    title: `${hazardTitles[ca.hazardType ?? 'unknown'] ?? 'Hazard'} — ${camLabel}`,
+    severity: sev,
+    label: sev === 'critical' ? 'CRITICAL' : sev === 'high' ? 'HIGH RISK' : 'INFO',
+    description: ca.description ?? '',
+    imageUrl: ca.imageUrl,
+    cameraId: ca.cameraId,
+    hazardType: ca.hazardType,
+    detectedAt: ca.detectedAt,
+    processingTime: ca.processingTime,
+  }
+}
 
 // ── Severity colors ──
 const severityColors = {
@@ -262,19 +365,17 @@ const statusColors: Record<string, { dot: string; text: string; label: string }>
 
 // ── Components ──
 
-function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazard, onInitiateFeeds }: {
+function Sidebar({ page, onNavigate, onSimulateHazard, onInitiateFeeds, avgProcessingTime }: {
   page: Page
   onNavigate: (p: Page) => void
-  alertsOpen: boolean
-  onToggleAlerts: () => void
   onSimulateHazard: () => Promise<boolean>
   onInitiateFeeds: () => Promise<boolean>
+  avgProcessingTime: number | null
 }) {
   const [hazardStatus, setHazardStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [initiateStatus, setInitiateStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const navItems = [
     { icon: Map, label: 'Live Map', id: 'map' as Page },
-    { icon: Bell, label: 'Alerts', id: 'alerts' as const },
     { icon: Video, label: 'Cameras', id: 'cameras' as Page },
   ]
 
@@ -292,13 +393,12 @@ function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazar
       {/* Nav */}
       <nav className="flex-1 px-4 py-4 space-y-2">
         {navItems.map((item) => {
-          const isAlerts = item.id === 'alerts'
-          const isActive = isAlerts ? alertsOpen : page === item.id
+          const isActive = page === item.id
 
           return (
             <button
               key={item.label}
-              onClick={() => isAlerts ? onToggleAlerts() : onNavigate(item.id as Page)}
+              onClick={() => onNavigate(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                 isActive
                   ? 'bg-[#13a4ec]/10 text-[#13a4ec] border border-[#13a4ec]/20'
@@ -307,9 +407,6 @@ function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazar
             >
               <item.icon size={20} />
               <span className="text-sm font-semibold">{item.label}</span>
-              {isAlerts && alerts.length > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{alerts.length}</span>
-              )}
             </button>
           )
         })}
@@ -366,15 +463,13 @@ function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazar
             <span className="text-xs font-bold text-slate-400">STATUS</span>
             <span className="flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
           </div>
-          <p className="text-xs text-slate-300 font-medium">AI Core: Optimized</p>
+          <p className="text-xs text-slate-300 font-medium">
+            Avg Processing: {avgProcessingTime !== null ? `${(avgProcessingTime / 1000).toFixed(1)}s` : '—'}
+          </p>
           <div className="w-full bg-slate-800 h-1 mt-2 rounded-full overflow-hidden">
-            <div className="bg-[#13a4ec] h-full w-[85%]" />
+            <div className="bg-[#13a4ec] h-full" style={{ width: avgProcessingTime !== null ? `${Math.min(100, Math.max(5, 100 - (avgProcessingTime / 1000)))}%` : '0%' }} />
           </div>
         </div>
-        <button className="w-full mt-4 flex items-center justify-center gap-2 bg-[#13a4ec] hover:bg-[#13a4ec]/90 text-white py-2.5 rounded-lg text-sm font-bold transition-all shadow-lg shadow-[#13a4ec]/20">
-          <Zap size={14} />
-          SYSTEM ONLINE
-        </button>
       </div>
     </aside>
   )
@@ -383,15 +478,17 @@ function Sidebar({ page, onNavigate, alertsOpen, onToggleAlerts, onSimulateHazar
 function AlertCard({ alert }: { alert: Alert }) {
   const colors = severityColors[alert.severity]
   return (
-    <div className={`p-4 rounded-xl ${colors.bg} ${colors.border} border flex flex-col gap-4`}>
+    <div className={`p-4 rounded-xl ${colors.bg} ${colors.border} border flex flex-col gap-3`}>
       <div className="flex justify-between items-start">
         <div className="flex flex-col gap-1">
           <span className={`text-[10px] font-bold ${colors.text} uppercase tracking-widest`}>{alert.label}</span>
           <h3 className="text-sm font-bold text-slate-100">{alert.title}</h3>
         </div>
-        <div className={`${colors.scoreBg} px-2 py-1 rounded`}>
-          <span className={`text-xs font-bold ${colors.text}`}>{alert.score}/100</span>
-        </div>
+        {alert.hazardType && (
+          <div className={`${colors.scoreBg} px-2 py-1 rounded`}>
+            <span className={`text-xs font-bold ${colors.text} uppercase`}>{alert.hazardType}</span>
+          </div>
+        )}
       </div>
 
       {alert.imageUrl && (
@@ -400,71 +497,75 @@ function AlertCard({ alert }: { alert: Alert }) {
         </div>
       )}
 
-      {alert.description && !alert.imageUrl && (
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-            <span className={`material-symbols-outlined ${colors.text}`}>
-              {alert.severity === 'high' ? 'nest_multi_room' : 'warning'}
-            </span>
-          </div>
-          <p className="text-[10px] text-slate-400 leading-tight">{alert.description}</p>
-        </div>
-      )}
-
-      {alert.description && alert.severity === 'info' && (
+      {alert.description && (
         <p className="text-xs text-slate-400 leading-normal">{alert.description}</p>
       )}
 
-      <div className="flex gap-2">
-        {alert.severity === 'critical' ? (
-          <>
-            <button className="flex-1 py-2 bg-red-500 text-white text-xs font-bold rounded-lg hover:bg-red-600 transition-colors">
-              {alert.actionLabel}
-            </button>
-            <button className="p-2 border border-slate-700 text-slate-400 rounded-lg hover:text-slate-100 transition-colors">
-              <Eye size={14} />
-            </button>
-          </>
-        ) : alert.severity === 'high' ? (
-          <button className="w-full py-2 bg-slate-800 text-slate-100 text-xs font-bold rounded-lg hover:bg-slate-700 transition-colors">
-            {alert.actionLabel}
-          </button>
-        ) : (
-          <button className="w-full py-2 border border-slate-700 text-slate-300 text-xs font-bold rounded-lg hover:bg-slate-800 transition-colors">
-            {alert.actionLabel}
-          </button>
-        )}
+      <div className="flex items-center justify-between text-[10px] text-slate-500">
+        {alert.detectedAt && <span>{new Date(alert.detectedAt).toLocaleTimeString()} · {formatAge(alert.detectedAt)}</span>}
+        {alert.processingTime != null && <span>Processed in {(alert.processingTime / 1000).toFixed(1)}s</span>}
       </div>
     </div>
   )
 }
 
-function RightSidebar() {
+function RightSidebar({ cameraAlerts, isOpen, onToggle }: { cameraAlerts: CameraAlert[]; isOpen: boolean; onToggle: () => void }) {
+  const displayAlerts = cameraAlerts
+    .filter(a => a.severity === 'critical' || a.severity === 'high' || a.severity === 'info')
+    .map(toDisplayAlert)
+    .sort((a, b) => new Date(b.detectedAt ?? 0).getTime() - new Date(a.detectedAt ?? 0).getTime())
+
+  const alertCount = displayAlerts.length
+  const hasCritical = displayAlerts.some(a => a.severity === 'critical')
+
+  if (!isOpen) {
+    return (
+      <div className="flex flex-col items-center py-4 px-2 border-l border-slate-800 bg-[#101c22] shrink-0">
+        <button
+          onClick={onToggle}
+          className="relative p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800/50 transition-colors"
+          aria-label="Open alerts panel"
+        >
+          <PanelRightClose size={20} />
+          {alertCount > 0 && (
+            <span className={`absolute -top-1 -right-1 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full ${hasCritical ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`}>
+              {alertCount}
+            </span>
+          )}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <aside className="w-80 flex flex-col border-l border-slate-800 bg-[#101c22] shrink-0">
       <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-        <h2 className="text-sm font-bold text-slate-100 tracking-wider">CRITICAL ALERTS</h2>
-        <MoreVertical size={16} className="text-slate-500" />
+        <div className="flex items-center gap-2">
+          <Bell size={16} className={hasCritical ? 'text-red-500' : 'text-slate-400'} />
+          <h2 className="text-sm font-bold text-slate-100 tracking-wider">ALERTS</h2>
+          {alertCount > 0 && (
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white ${hasCritical ? 'bg-red-500' : 'bg-amber-500'}`}>
+              {alertCount}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onToggle}
+          className="p-1 rounded text-slate-500 hover:text-slate-100 transition-colors"
+          aria-label="Close alerts panel"
+        >
+          <PanelRightOpen size={16} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {alerts.map((alert) => (
-          <AlertCard key={alert.id} alert={alert} />
-        ))}
-      </div>
-
-      {/* Footer Stats */}
-      <div className="p-4 border-t border-slate-800 bg-[#101c22]/50">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2 rounded-lg bg-slate-900/50 border border-slate-800">
-            <p className="text-[10px] font-bold text-slate-500 mb-1">SCAN RATE</p>
-            <p className="text-lg font-bold text-[#13a4ec]">1.2ms</p>
-          </div>
-          <div className="p-2 rounded-lg bg-slate-900/50 border border-slate-800">
-            <p className="text-[10px] font-bold text-slate-500 mb-1">OBJECTS</p>
-            <p className="text-lg font-bold text-slate-100">142</p>
-          </div>
-        </div>
+        {displayAlerts.length === 0 ? (
+          <p className="text-xs text-slate-500 text-center py-8">No active alerts</p>
+        ) : (
+          displayAlerts.map((alert) => (
+            <AlertCard key={alert.id} alert={alert} />
+          ))
+        )}
       </div>
     </aside>
   )
@@ -810,7 +911,30 @@ function App() {
   const [alertsOpen, setAlertsOpen] = React.useState(true)
   const [selectedCamera, setSelectedCamera] = React.useState<CameraFeed | null>(null)
   const { cameras, loading, refresh } = useCameraFeeds()
-  const { cameraAlerts } = useCameraAlerts()
+  const { cameraAlerts, refreshAlerts } = useCameraAlerts()
+
+  // Subscribe to AppSync Events — refresh both alerts and camera feeds on any event
+  const handleWebSocketMessage = React.useCallback(() => {
+    refreshAlerts()
+    refresh()
+  }, [refreshAlerts, refresh])
+
+  const wsHttpDomain = config.eventsHttpDomain
+  const wsApiKey = config.eventsApiKey
+  const wsUrl = wsHttpDomain ? `wss://${wsHttpDomain.replace('appsync-api', 'appsync-realtime-api')}/event/realtime` : ''
+
+  useWebSocket({
+    url: wsUrl,
+    apiKey: wsApiKey || '',
+    httpDomain: wsHttpDomain || '',
+    onMessage: handleWebSocketMessage,
+    enabled: !!wsUrl && !!wsApiKey && !!wsHttpDomain,
+  })
+
+  const avgProcessingTime = React.useMemo(() => {
+    const times = cameraAlerts.filter(a => a.processingTime != null).map(a => a.processingTime!)
+    return times.length > 0 ? times.reduce((sum, t) => sum + t, 0) / times.length : null
+  }, [cameraAlerts])
 
   const simulateHazard = React.useCallback(async (): Promise<boolean> => {
     try {
@@ -849,10 +973,9 @@ function App() {
       <Sidebar
         page={page}
         onNavigate={setPage}
-        alertsOpen={alertsOpen}
-        onToggleAlerts={() => setAlertsOpen(prev => !prev)}
         onSimulateHazard={simulateHazard}
         onInitiateFeeds={initiateFeeds}
+        avgProcessingTime={avgProcessingTime}
       />
 
       {/* Main Content */}
@@ -865,7 +988,7 @@ function App() {
         <CamerasPage cameraFeeds={cameras} loading={loading} onRefresh={refresh} onSelectCamera={setSelectedCamera} />
       )}
 
-      {alertsOpen && <RightSidebar />}
+      <RightSidebar cameraAlerts={cameraAlerts} isOpen={alertsOpen} onToggle={() => setAlertsOpen(prev => !prev)} />
 
       <CameraOverlay camera={selectedCamera} onClose={() => setSelectedCamera(null)} />
     </div>

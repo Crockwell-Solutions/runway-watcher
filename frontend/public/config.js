@@ -2,4 +2,6 @@
 // For local development, edit this file or use .env.local instead.
 window.__RUNTIME_CONFIG__ = {
   apiUrl: "http://localhost:3000",
+  eventsHttpDomain: "",
+  eventsApiKey: "",
 };

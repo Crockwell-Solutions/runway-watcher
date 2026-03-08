@@ -23,6 +23,8 @@ export interface FrontendStackProps extends StackProps {
   stage: Stage;
   envConfig: EnvironmentConfig;
   apiUrl: string;
+  eventsApiUrl: string;
+  eventsApiKey: string;
 }
 
 export class FrontendStack extends Stack {
@@ -91,8 +93,12 @@ export class FrontendStack extends Stack {
     // is a CloudFormation token — AwsCustomResource resolves it at deploy time
     // and always executes the PutObject call.
     const configBody = cdk.Fn.sub(
-      'window.__RUNTIME_CONFIG__ = {"apiUrl":"${ApiUrl}"};',
-      { ApiUrl: props.apiUrl },
+      'window.__RUNTIME_CONFIG__ = {"apiUrl":"${ApiUrl}","eventsHttpDomain":"${EventsHttpDomain}","eventsApiKey":"${EventsApiKey}"};',
+      {
+        ApiUrl: props.apiUrl,
+        EventsHttpDomain: props.eventsApiUrl,
+        EventsApiKey: props.eventsApiKey,
+      },
     );
 
     const configUpload = new AwsCustomResource(this, 'ConfigDeployment', {

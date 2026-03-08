@@ -7,7 +7,7 @@
  * This software is licensed under the GNU General Public License v3.0.
  */
 
-import { Duration, Stack, StackProps, CfnOutput } from 'aws-cdk-lib/core';
+import { Duration, Stack, StackProps, CfnOutput, SecretValue } from 'aws-cdk-lib/core';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -18,12 +18,18 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as bedrock from '@aws-cdk/aws-bedrock-alpha';
+import * as pipes from '@aws-cdk/aws-pipes-alpha';
+import { ApiDestinationTarget } from '@aws-cdk/aws-pipes-targets-alpha';
+import { DynamoDBSource, DynamoDBStartingPosition } from '@aws-cdk/aws-pipes-sources-alpha';
 import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { EnvironmentConfig, Stage } from '@config';
 import { CustomLambda } from '@constructs';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 
 export interface RunwayWatcherStatelessStackProps extends StackProps {
   stage: Stage;
@@ -35,6 +41,7 @@ export interface RunwayWatcherStatelessStackProps extends StackProps {
 
 export class RunwayWatcherStatelessStack extends Stack {
   public readonly apiUrl: string;
+  public readonly eventsApi: appsync.EventApi;
 
   constructor(scope: Construct, id: string, props: RunwayWatcherStatelessStackProps) {
     super(scope, id, props);
@@ -150,10 +157,12 @@ export class RunwayWatcherStatelessStack extends Stack {
       envConfig: props.envConfig,
       environmentVariables: {
         TABLE_NAME: props.runwayWatcherTable.tableName,
+        BUCKET_NAME: props.cameraImagesBucketName,
       },
     });
 
     props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
+    cameraImagesBucket.grantRead(getAlertsLambda.lambda);
 
     // Add API endpoints
     const camerasResource = api.root.addResource('cameras');
@@ -323,5 +332,103 @@ export class RunwayWatcherStatelessStack extends Stack {
         ],
       }),
     );
+
+    // Create and AppSync Events API that will be used for real-time notification of new alerts to the frontend
+
+    // Create the Lambda function that will be used for enrichment
+    const alertEnrichment = new CustomLambda(this, 'AlertEnrichmentFunction', {
+      functionName: `alert-enrichment-${props.stage}`,
+      source: 'backend/alert-enrichment.ts',
+      envConfig: props.envConfig,
+    });
+
+    // Create the AppSync Events Websocket API
+    const apiKeyProvider = { authorizationType: appsync.AppSyncAuthorizationType.API_KEY };
+
+    // Create the Appsync Events API
+    this.eventsApi = new appsync.EventApi(this, 'RunwayWatcherEventsApi', {
+      apiName: 'RunwayWatcherEvents',
+      authorizationConfig: { authProviders: [apiKeyProvider] },
+    });
+
+    // add a channel namespace called `alerts`
+    this.eventsApi.addChannelNamespace('alerts');
+
+    // Create a new secret for the AppSync Events API Key
+    const apiKeySecret = new Secret(this, 'RunwayWatcherApiKeySecret', {
+      secretName: 'RunwayWatcherApiKey',
+      secretStringValue: SecretValue.unsafePlainText(this.eventsApi.apiKeys['Default'].attrApiKey),
+    });
+
+    // Create an Eventbridge API destinations used for sending events to AppSync Events
+    const connection = new events.Connection(this, 'RunwayWatcherAppsyncConnection', {
+      authorization: events.Authorization.apiKey('x-api-key', apiKeySecret.secretValue),
+      description: 'Connection with API Key x-api-key',
+    });
+    const runwayWatcherAppsyncDestination = new events.ApiDestination(this, 'RunwayWatcherAppsyncDestination', {
+      connection,
+      endpoint: `https://${this.eventsApi.httpDns}/event`,
+      httpMethod: events.HttpMethod.POST,
+      description: 'Calling AppSync Events API',
+    });
+
+    // Create the filter that will be used for the EventBridge Pipe
+    const sourceFilter = new pipes.Filter([
+      pipes.FilterPattern.fromObject({
+        eventName: ['INSERT'],
+        dynamodb: {
+          NewImage: {
+            PK: {
+              S: ['ALERT'],
+            },
+          },
+        },
+      }),
+    ]);
+
+    // Create the log group used for the EventBridge Pipe
+    const logGroup = new LogGroup(this, 'HazardEventsPipeLogGroup', {
+      retention: RetentionDays.ONE_WEEK,
+    });
+    const cwlLogDestination = new pipes.CloudwatchLogsLogDestination(logGroup);
+
+    // Create the EventBridge Pipe that will process new hazard events from DynamoDB stream and publish to AppSync Events API
+    new pipes.Pipe(this, 'HazardEventsPipe', {
+      source: new DynamoDBSource(props.runwayWatcherTable, {
+        startingPosition: DynamoDBStartingPosition.LATEST,
+        batchSize: 1,
+      }),
+      target: new ApiDestinationTarget(runwayWatcherAppsyncDestination),
+      enrichment: new LambdaEnrichment(alertEnrichment.lambda),
+      logLevel: pipes.LogLevel.TRACE,
+      logIncludeExecutionData: [pipes.IncludeExecutionData.ALL],
+      logDestinations: [cwlLogDestination],
+      filter: sourceFilter,
+    });
+  }
+}
+
+class LambdaEnrichment implements pipes.IEnrichment {
+  enrichmentArn: string;
+  private inputTransformation: pipes.InputTransformation | undefined;
+
+  constructor(
+    private readonly lambda: lambda.Function,
+    props: { inputTransformation?: pipes.InputTransformation } = {},
+  ) {
+    this.enrichmentArn = lambda.functionArn;
+    this.inputTransformation = props?.inputTransformation;
+  }
+
+  bind(pipe: pipes.IPipe): pipes.EnrichmentParametersConfig {
+    return {
+      enrichmentParameters: {
+        inputTemplate: this.inputTransformation?.bind(pipe).inputTemplate,
+      },
+    };
+  }
+
+  grantInvoke(pipeRole: iam.IRole): void {
+    this.lambda.grantInvoke(pipeRole);
   }
 }

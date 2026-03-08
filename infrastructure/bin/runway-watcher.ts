@@ -27,4 +27,6 @@ new FrontendStack(app, 'RunwayWatcherFrontendStack', {
   stage: stage,
   envConfig: envConfig,
   apiUrl: statelessStack.apiUrl,
+  eventsApiUrl: statelessStack.eventsApi.httpDns,
+  eventsApiKey: statelessStack.eventsApi.apiKeys['Default'].attrApiKey,
 });

@@ -24,6 +24,8 @@
   },
   "dependencies": {
     "@aws-cdk/aws-bedrock-alpha": "^2.241.0-alpha.0",
+    "@aws-cdk/aws-pipes-sources-alpha": "^2.241.0-alpha.0",
+    "@aws-cdk/aws-pipes-targets-alpha": "^2.241.0-alpha.0",
     "aws-cdk-lib": "^2.241.0",
     "cdk-nag": "^2.37.55",
     "constructs": "^10.5.1"

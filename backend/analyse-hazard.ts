@@ -25,6 +25,7 @@ const HAZARD_LABELS: Record<string, string> = {
   'Crow': 'bird',
   'Hawk': 'bird',
   'Drone': 'drone',
+  'UAV': 'drone',
   'Vehicle': 'vehicle',
   'Car': 'vehicle',
   'Truck': 'vehicle',
