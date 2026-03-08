@@ -119,9 +119,9 @@ function useCameraAlerts() {
 
 // ── Camera positions on the map (2400x1200 canvas) ──
 const cameraPositions: Record<string, { top: number; left: number; label: string; directionDeg: number }> = {
-  CAMERA1: { top: 1000, left: 400, label: 'CAM 1 — RUNWAY SOUTH', directionDeg: 45 },
-  CAMERA2: { top: 700, left: 50, label: 'CAM 2 — PERIMETER WEST', directionDeg: 90 },
-  CAMERA3: { top: 1200, left: 1800, label: 'CAM 3 — PERIMETER EAST', directionDeg: -22.5 },
+  CAMERA1: { top: 900, left: 400, label: 'CAM 1 — RUNWAY SOUTH', directionDeg: 45 },
+  CAMERA2: { top: 600, left: 100, label: 'CAM 2 — PERIMETER WEST', directionDeg: 90 },
+  CAMERA3: { top: 1000, left: 1800, label: 'CAM 3 — PERIMETER EAST', directionDeg: -22.5 },
 }
 
 // ── Alert type to icon mapping (Material Symbols) ──

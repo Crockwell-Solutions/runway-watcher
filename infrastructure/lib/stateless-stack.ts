@@ -18,6 +18,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as bedrock from '@aws-cdk/aws-bedrock-alpha';
 import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
@@ -154,8 +155,6 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
 
-
-
     // Add API endpoints
     const camerasResource = api.root.addResource('cameras');
     const latestResource = camerasResource.addResource('latest');
@@ -167,6 +166,90 @@ export class RunwayWatcherStatelessStack extends Stack {
     const initiateResource = api.root.addResource('initiate-feeds');
     initiateResource.addMethod('POST', new apigateway.LambdaIntegration(uploadImagesLambda.lambda));
 
+    // Action group Lambda — fetches camera images from S3 for the Bedrock Agent
+    const fetchCameraImageLambda = new CustomLambda(this, 'FetchCameraImageFunction', {
+      functionName: `fetch-camera-image-${props.stage}`,
+      source: 'backend/fetch-camera-image.ts',
+      envConfig: props.envConfig,
+    });
+    cameraImagesBucket.grantRead(fetchCameraImageLambda.lambda);
+
+    // Define the action group function schema
+    const cameraImageFunctionSchema = new bedrock.FunctionSchema({
+      functions: [
+        {
+          name: 'fetchCameraImage',
+          description:
+            'Fetches camera image metadata from S3 including file size, content type, camera ID, and last modified time. ' +
+            'Use this to gather additional context about the camera image when assessing hazards.',
+          parameters: {
+            bucketName: {
+              type: bedrock.ParameterType.STRING,
+              required: true,
+              description: 'The S3 bucket name where the camera image is stored',
+            },
+            imageKey: {
+              type: bedrock.ParameterType.STRING,
+              required: true,
+              description: 'The S3 object key of the camera image',
+            },
+          },
+          requireConfirmation: bedrock.RequireConfirmation.DISABLED,
+        },
+      ],
+    });
+
+    const cameraImageActionGroup = new bedrock.AgentActionGroup({
+      name: 'fetchs3',
+      description: 'Tools for fetching camera image metadata from S3',
+      executor: bedrock.ActionGroupExecutor.fromLambda(fetchCameraImageLambda.lambda),
+      functionSchema: cameraImageFunctionSchema,
+      enabled: true,
+    });
+
+    // Cross-region inference profile for Nova Pro (not available as single-region in eu-west-1)
+    const novaProCrossRegion = bedrock.CrossRegionInferenceProfile.fromConfig({
+      geoRegion: bedrock.CrossRegionInferenceProfileRegion.EU,
+      model: bedrock.BedrockFoundationModel.AMAZON_NOVA_PRO_V1,
+    });
+
+    // Bedrock Agent for hazard severity assessment
+    const hazardAssessmentAgent = new bedrock.Agent(this, 'HazardAssessmentAgent', {
+      foundationModel: novaProCrossRegion,
+      instruction:
+        'You are an airport runway safety expert. You will be given a hazard type and Rekognition labels from a camera image analysis. ' +
+        'You may use the fetchs3 tool to get additional metadata about the image and the pre-signed URL ' +
+        'Use the pre-signed URL to get the actual image' +
+        'Based on the Rekognition labels and any metadata, assess the severity and provide a description. ' +
+        'You should assess the image independently of the labels, and determine if it is a real hazard.\n' +
+        'In particular, look out for birds, drones in the picture and look out for any debris or mechanical parts (e.g. wheels) on the runway\n' + 
+        'If you cannot determine a severity, respond with severity "info" and a description of the image content.\n' +
+        'For the purposes of image recognition, UAVs should be considered as drones\n' + 
+        'If the rekognition hazard type is "vehicle", you should assess to see if there is actually an drone/UAV in the picture. If so, that should take precedence as the hazard\n' +
+        'Respond ONLY with valid JSON in this exact format: {"severity":"critical|high|info|none","hazard":"bird|drone|vehicle|debris|unknown|none","description":"<one sentence description>"}. ' +
+        'Severity guidelines: ' +
+        '- "critical": drones, unauthorized vehicles, or persons on the runway — immediate danger to aircraft operations. ' +
+        '- "high": debris, foreign objects, or large animals — significant risk requiring prompt action. birds or small wildlife ' +
+        'The description should mention the specific hazard, camera location, and potential impact on runway operations.',
+      shouldPrepareAgent: true,
+      actionGroups: [cameraImageActionGroup],
+    });
+
+    // Ensure the agent's role can invoke the cross-region inference profile
+    hazardAssessmentAgent.role.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+      resources: [
+        novaProCrossRegion.inferenceProfileArn,
+        `arn:aws:bedrock:${this.region}::foundation-model/amazon.nova-pro-v1:0`,
+      ],
+    }));
+
+    const hazardAgentAlias = new bedrock.AgentAlias(this, 'HazardAssessmentAgentAlias', {
+      agent: hazardAssessmentAgent,
+      agentAliasName: 'live',
+      description: 'Points to latest prepared agent version - Nova Pro EU cross-region',
+    });
+
     // Durable Lambda function for multi-step hazard analysis workflow
     const analyseHazardLambda = new CustomLambda(this, 'AnalyseHazardDurableFunction', {
       functionName: `analyse-hazard-durable-${props.stage}`,
@@ -176,6 +259,8 @@ export class RunwayWatcherStatelessStack extends Stack {
       environmentVariables: {
         TABLE_NAME: props.runwayWatcherTable.tableName,
         BUCKET_NAME: props.cameraImagesBucketName,
+        BEDROCK_AGENT_ID: hazardAssessmentAgent.agentId,
+        BEDROCK_AGENT_ALIAS_ID: hazardAgentAlias.aliasId,
       },
       durableConfig: {
         executionTimeout: Duration.minutes(10),
@@ -193,6 +278,15 @@ export class RunwayWatcherStatelessStack extends Stack {
     analyseHazardLambda.lambda.addToRolePolicy(new iam.PolicyStatement({
       actions: ['rekognition:DetectLabels'],
       resources: ['*'],
+    }));
+
+    // Grant permission to invoke the Bedrock Agent
+    analyseHazardLambda.lambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeAgent'],
+      resources: [
+        hazardAssessmentAgent.agentArn,
+        hazardAgentAlias.aliasArn,
+      ],
     }));
 
     // Attach the durable execution managed policy (required for checkpointing)
@@ -216,7 +310,7 @@ export class RunwayWatcherStatelessStack extends Stack {
       new DynamoEventSource(props.runwayWatcherTable, {
         startingPosition: StartingPosition.LATEST,
         batchSize: 1,
-        retryAttempts: 3,
+        retryAttempts: 1,
         filters: [
           FilterCriteria.filter({
             eventName: FilterRule.or('INSERT', 'MODIFY'),
