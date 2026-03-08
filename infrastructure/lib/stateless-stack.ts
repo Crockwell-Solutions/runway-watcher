@@ -14,8 +14,12 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { EnvironmentConfig, Stage } from '@config';
 import { CustomLambda } from '@constructs';
@@ -138,11 +142,6 @@ export class RunwayWatcherStatelessStack extends Stack {
     props.runwayWatcherTable.grantReadData(getLatestImagesLambda.lambda);
     cameraImagesBucket.grantRead(getLatestImagesLambda.lambda);
 
-    // GET /cameras/latest endpoint
-    const camerasResource = api.root.addResource('cameras');
-    const latestResource = camerasResource.addResource('latest');
-    latestResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestImagesLambda.lambda));
-
     // Lambda function to query DynamoDB for camera alerts
     const getAlertsLambda = new CustomLambda(this, 'GetAlertsFunction', {
       functionName: `get-alerts-${props.stage}`,
@@ -155,8 +154,72 @@ export class RunwayWatcherStatelessStack extends Stack {
 
     props.runwayWatcherTable.grantReadData(getAlertsLambda.lambda);
 
-    // GET /cameras/alerts endpoint
+    // Add API endpoints
+    const camerasResource = api.root.addResource('cameras');
+    const latestResource = camerasResource.addResource('latest');
+    latestResource.addMethod('GET', new apigateway.LambdaIntegration(getLatestImagesLambda.lambda));
     const alertsResource = camerasResource.addResource('alerts');
     alertsResource.addMethod('GET', new apigateway.LambdaIntegration(getAlertsLambda.lambda));
+
+    // Durable Lambda function for multi-step hazard analysis workflow
+    const analyseHazardLambda = new CustomLambda(this, 'AnalyseHazardFunction', {
+      functionName: `analyse-hazard-${props.stage}`,
+      source: 'backend/analyse-hazard.ts',
+      envConfig: props.envConfig,
+      timeout: Duration.seconds(900),
+      environmentVariables: {
+        TABLE_NAME: props.runwayWatcherTable.tableName,
+        BUCKET_NAME: props.cameraImagesBucketName,
+      },
+      durableConfig: {
+        executionTimeout: Duration.hours(1),
+        retentionPeriod: Duration.days(7),
+      },
+    });
+
+    // Grant DynamoDB read/write for writing alert records
+    props.runwayWatcherTable.grantReadWriteData(analyseHazardLambda.lambda);
+
+    // Grant read access to camera images bucket (for Rekognition to read images)
+    cameraImagesBucket.grantRead(analyseHazardLambda.lambda);
+
+    // Grant Rekognition DetectLabels permission
+    analyseHazardLambda.lambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['rekognition:DetectLabels'],
+      resources: ['*'],
+    }));
+
+    // Attach the durable execution managed policy (required for checkpointing)
+    analyseHazardLambda.lambda.role?.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName(
+        'service-role/AWSLambdaBasicDurableExecutionRolePolicy',
+      ),
+    );
+
+    // Create a version and alias (durable functions require qualified ARN invocation)
+    const analyseHazardVersion = analyseHazardLambda.lambda.currentVersion;
+    new lambda.Alias(this, 'AnalyseHazardAlias', {
+      aliasName: 'live',
+      version: analyseHazardVersion,
+    });
+
+    // Trigger from DynamoDB Streams on NEW/MODIFIED records where PK = 'LATEST'
+    analyseHazardLambda.lambda.addEventSource(
+      new DynamoEventSource(props.runwayWatcherTable, {
+        startingPosition: StartingPosition.LATEST,
+        batchSize: 1,
+        retryAttempts: 3,
+        filters: [
+          FilterCriteria.filter({
+            eventName: FilterRule.or('INSERT', 'MODIFY'),
+            dynamodb: {
+              NewImage: {
+                PK: { S: FilterRule.isEqual('LATEST') },
+              },
+            },
+          }),
+        ],
+      }),
+    );
   }
 }
