@@ -24,6 +24,7 @@ interface Alert {
   detectedAt?: string
   processingTime?: number
   acknowledged?: boolean
+  boundingBoxes?: BoundingBox[]
 }
 
 interface CameraFeed {
@@ -86,6 +87,14 @@ function useCameraFeeds() {
 }
 
 // ── Types for camera alerts from API ──
+interface BoundingBox {
+  width: number
+  height: number
+  left: number
+  top: number
+  label: string
+}
+
 interface CameraAlert {
   id?: string
   cameraId?: string
@@ -99,6 +108,7 @@ interface CameraAlert {
   processingTime?: number
   acknowledged?: boolean
   acknowledgedAt?: string
+  boundingBoxes?: BoundingBox[]
 }
 
 // ── Hook to fetch camera alerts from the API ──
@@ -260,17 +270,24 @@ const alertTypeIcons: Record<string, string> = {
   vehicle: 'local_shipping',
 }
 
+// Normalise camera IDs so CAMERA1 and camera-1 both become "camera1"
+function normalizeCameraId(id: string): string {
+  return id.toLowerCase().replace(/-/g, '')
+}
+
 function getAlertLevel(cameraAlerts: CameraAlert[], cameraId: string): 'normal' | 'warning' | 'alert' {
-  const camAlerts = cameraAlerts.filter(a => a.cameraId === cameraId && !a.acknowledged)
+  const norm = normalizeCameraId(cameraId)
+  const camAlerts = cameraAlerts.filter(a => normalizeCameraId(a.cameraId ?? '') === norm && !a.acknowledged)
   if (camAlerts.some(a => a.severity === 'critical')) return 'alert'
   if (camAlerts.some(a => a.severity === 'high')) return 'warning'
   return 'normal'
 }
 
 function getAlertDetails(cameraAlerts: CameraAlert[], cameraId: string): CameraAlert | undefined {
+  const norm = normalizeCameraId(cameraId)
   // Return the highest-priority unacknowledged alert for this camera
-  return cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'critical' && !a.acknowledged)
-    ?? cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'high' && !a.acknowledged)
+  return cameraAlerts.find(a => normalizeCameraId(a.cameraId ?? '') === norm && a.severity === 'critical' && !a.acknowledged)
+    ?? cameraAlerts.find(a => normalizeCameraId(a.cameraId ?? '') === norm && a.severity === 'high' && !a.acknowledged)
 }
 
 function CameraMapMarker({ cameraId, position, cameraAlerts, onSelect }: {
@@ -366,6 +383,7 @@ function toDisplayAlert(ca: CameraAlert): Alert {
     detectedAt: ca.detectedAt,
     processingTime: ca.processingTime,
     acknowledged: ca.acknowledged ?? false,
+    boundingBoxes: ca.boundingBoxes,
   }
 }
 
@@ -495,6 +513,31 @@ function Sidebar({ page, onNavigate, onSimulateHazard, onInitiateFeeds, avgProce
   )
 }
 
+// ── Bounding box overlay for hazard highlighting ──
+function BoundingBoxOverlay({ boxes }: { boxes?: BoundingBox[] }) {
+  if (!boxes || boxes.length === 0) return null
+  return (
+    <>
+      {boxes.map((box, i) => (
+        <div
+          key={i}
+          className="absolute border-2 border-red-500 rounded-sm pointer-events-none"
+          style={{
+            left: `${box.left * 100}%`,
+            top: `${box.top * 100}%`,
+            width: `${box.width * 100}%`,
+            height: `${box.height * 100}%`,
+          }}
+        >
+          <span className="absolute -top-5 left-0 bg-red-500 text-white text-[9px] font-bold px-1 rounded-sm whitespace-nowrap">
+            {box.label}
+          </span>
+        </div>
+      ))}
+    </>
+  )
+}
+
 function AlertCard({ alert, onAcknowledge }: { alert: Alert; onAcknowledge?: (id: string) => void }) {
   const [acking, setAcking] = React.useState(false)
   const colors = severityColors[alert.severity]
@@ -517,8 +560,9 @@ function AlertCard({ alert, onAcknowledge }: { alert: Alert; onAcknowledge?: (id
       </div>
 
       {alert.imageUrl && (
-        <div className={`aspect-video w-full rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900 ${isAcked ? 'grayscale' : ''}`}>
+        <div className={`aspect-video w-full rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900 relative ${isAcked ? 'grayscale' : ''}`}>
           <img src={alert.imageUrl} alt={alert.title} className="w-full h-full object-cover" />
+          {!isAcked && <BoundingBoxOverlay boxes={alert.boundingBoxes} />}
         </div>
       )}
 
@@ -640,7 +684,7 @@ function ImageAge({ timestamp }: { timestamp?: string }) {
   )
 }
 
-function CameraStrip({ cameraFeeds, loading, onSelectCamera }: { cameraFeeds: CameraFeed[]; loading: boolean; onSelectCamera: (cam: CameraFeed) => void }) {
+function CameraStrip({ cameraFeeds, cameraAlerts, loading, onSelectCamera }: { cameraFeeds: CameraFeed[]; cameraAlerts: CameraAlert[]; loading: boolean; onSelectCamera: (cam: CameraFeed) => void }) {
   if (loading) {
     return (
       <div className="h-44 bg-[#101c22] border-t border-slate-800 p-4 flex items-center justify-center shrink-0">
@@ -657,31 +701,48 @@ function CameraStrip({ cameraFeeds, loading, onSelectCamera }: { cameraFeeds: Ca
     )
   }
 
+  const alertBorderColors = {
+    normal: 'border-slate-700 hover:border-[#13a4ec]/50',
+    warning: 'border-amber-500 hover:border-amber-400',
+    alert: 'border-red-500 hover:border-red-400',
+  }
+
+  const alertDotColors = {
+    normal: cam => cam.status === 'recording' ? 'bg-red-600' : 'bg-emerald-600',
+    warning: () => 'bg-amber-500 animate-pulse',
+    alert: () => 'bg-red-500 animate-pulse',
+  } as Record<string, (cam: CameraFeed) => string>
+
   return (
     <div className="h-44 bg-[#101c22] border-t border-slate-800 p-4 flex gap-4 overflow-x-auto shrink-0">
-      {cameraFeeds.map((cam) => (
-        <div
-          key={cam.id}
-          className="flex-none w-64 group relative overflow-hidden rounded-lg border border-slate-700 cursor-pointer hover:border-[#13a4ec]/50 transition-colors"
-          onClick={() => onSelectCamera(cam)}
-        >
-          <div className="absolute top-2 left-2 z-10 flex items-center gap-2 bg-black/60 px-2 py-1 rounded text-[10px] font-bold text-white">
-            <span className={`w-1.5 h-1.5 rounded-full ${cam.status === 'recording' ? 'bg-red-600' : 'bg-emerald-600'}`} />
-            {cam.id} ({cam.name})
+      {cameraFeeds.map((cam) => {
+        const level = getAlertLevel(cameraAlerts, cam.id)
+        return (
+          <div
+            key={cam.id}
+            className={`flex-none w-64 group relative overflow-hidden rounded-lg border-2 ${alertBorderColors[level]} cursor-pointer transition-colors`}
+            onClick={() => onSelectCamera(cam)}
+          >
+            <div className="absolute top-2 left-2 z-10 flex items-center gap-2 bg-black/60 px-2 py-1 rounded text-[10px] font-bold text-white">
+              <span className={`w-1.5 h-1.5 rounded-full ${alertDotColors[level](cam)}`} />
+              {cam.id} ({cam.name})
+            </div>
+            <img
+              src={cam.imageUrl}
+              alt={`${cam.id} - ${cam.name}`}
+              className="h-full w-full object-cover transition-transform group-hover:scale-110"
+            />
+            <ImageAge timestamp={cam.timestamp} />
           </div>
-          <img
-            src={cam.imageUrl}
-            alt={`${cam.id} - ${cam.name}`}
-            className="h-full w-full object-cover transition-transform group-hover:scale-110"
-          />
-          <ImageAge timestamp={cam.timestamp} />
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
-function CameraOverlay({ camera, onClose }: { camera: CameraFeed | null; onClose: () => void }) {
+function CameraOverlay({ camera, cameraAlerts, onClose }: { camera: CameraFeed | null; cameraAlerts: CameraAlert[]; onClose: () => void }) {
   if (!camera) return null
+
+  const alertDetail = getAlertDetails(cameraAlerts, camera.id)
 
   return (
     <motion.div
@@ -706,11 +767,14 @@ function CameraOverlay({ camera, onClose }: { camera: CameraFeed | null; onClose
         >
           <X size={16} />
         </button>
-        <img
-          src={camera.imageUrl}
-          alt={`${camera.id} - ${camera.name}`}
-          className="w-full aspect-video object-cover"
-        />
+        <div className="relative">
+          <img
+            src={camera.imageUrl}
+            alt={`${camera.id} - ${camera.name}`}
+            className="w-full aspect-video object-cover"
+          />
+          <BoundingBoxOverlay boxes={alertDetail?.boundingBoxes} />
+        </div>
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-4">
           <p className="text-xs text-slate-400">{camera.location}</p>
           {camera.timestamp && (
@@ -1028,7 +1092,7 @@ function App() {
       {page === 'map' ? (
         <main className="flex-1 flex flex-col relative overflow-hidden bg-[#0c1419]">
           <MapViewport cameraAlerts={cameraAlerts} cameraFeeds={cameras} onSelectCamera={setSelectedCamera} />
-          <CameraStrip cameraFeeds={cameras} loading={loading} onSelectCamera={setSelectedCamera} />
+          <CameraStrip cameraFeeds={cameras} cameraAlerts={cameraAlerts} loading={loading} onSelectCamera={setSelectedCamera} />
         </main>
       ) : (
         <CamerasPage cameraFeeds={cameras} loading={loading} onRefresh={refresh} onSelectCamera={setSelectedCamera} />
@@ -1036,7 +1100,7 @@ function App() {
 
       <RightSidebar cameraAlerts={cameraAlerts} isOpen={alertsOpen} onToggle={() => setAlertsOpen(prev => !prev)} onAcknowledge={acknowledgeAlert} />
 
-      <CameraOverlay camera={selectedCamera} onClose={() => setSelectedCamera(null)} />
+      <CameraOverlay camera={selectedCamera} cameraAlerts={cameraAlerts} onClose={() => setSelectedCamera(null)} />
     </div>
   )
 }

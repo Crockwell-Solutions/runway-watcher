@@ -93,18 +93,37 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
       }));
 
       // Find the first detected label that matches a known hazard
+      // and collect bounding boxes from all matching hazard instances.
+      // Also capture Aircraft/Airplane instances — Bedrock may reclassify these as drones.
+      const AIRCRAFT_LABELS = new Set(['Aircraft', 'Airplane', 'Jet', 'Aeroplane']);
       let hazardType = 'none';
-      for (const label of labels) {
-        if (label.name in HAZARD_LABELS) {
-          hazardType = HAZARD_LABELS[label.name];
-          break;
+      const boundingBoxes: { width: number; height: number; left: number; top: number; label: string }[] = [];
+      for (const rkLabel of response.Labels ?? []) {
+        const name = rkLabel.Name ?? '';
+        const isHazard = name in HAZARD_LABELS;
+        const isAircraft = AIRCRAFT_LABELS.has(name);
+        if (isHazard || isAircraft) {
+          if (isHazard && hazardType === 'none') {
+            hazardType = HAZARD_LABELS[name];
+          }
+          for (const inst of rkLabel.Instances ?? []) {
+            if (inst.BoundingBox) {
+              boundingBoxes.push({
+                width: inst.BoundingBox.Width ?? 0,
+                height: inst.BoundingBox.Height ?? 0,
+                left: inst.BoundingBox.Left ?? 0,
+                top: inst.BoundingBox.Top ?? 0,
+                label: name,
+              });
+            }
+          }
         }
       }
 
-      return { hazardType, labels };
+      return { hazardType, labels, boundingBoxes };
     }, { retryStrategy: retryOnce });
 
-    let { hazardType, labels } = rekognitionResult;
+    let { hazardType, labels, boundingBoxes } = rekognitionResult;
     context.logger.info('Hazard classified', { cameraId, hazardType });
 
     // Step 2 — call Nova Pro directly via Converse API with the actual image bytes
@@ -238,6 +257,17 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
       hazardType = assessment.hazard;
     }
 
+    // If Bedrock identified a drone but Rekognition labelled it as Aircraft/Airplane/etc,
+    // relabel those bounding boxes so the frontend shows "Drone"
+    if (hazardType === 'drone') {
+      const AIRCRAFT_RELABEL = new Set(['Aircraft', 'Airplane', 'Jet', 'Aeroplane']);
+      for (const box of boundingBoxes) {
+        if (AIRCRAFT_RELABEL.has(box.label)) {
+          box.label = 'Drone';
+        }
+      }
+    }
+
     // Step 3 — persist alert to DynamoDB
     await context.step(`write-alert-${cameraId}`, async () => {
       const now = new Date().toISOString();
@@ -254,6 +284,7 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
           DetectedAt: { S: detectedAt },
           ProcessedAt: { S: now },
           ProcessingTime: { N: (Date.now() - new Date(detectedAt).getTime()).toString() },
+          ...(boundingBoxes.length > 0 ? { BoundingBoxes: { S: JSON.stringify(boundingBoxes) } } : {}),
           ttl: { N: (Math.floor(Date.now() / 1000) + 60 * 180).toString() } // 3 hour TTL
         },
       }));

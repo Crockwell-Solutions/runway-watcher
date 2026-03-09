@@ -25,10 +25,13 @@ declare global {
 function getConfig(): RuntimeConfig {
   const runtimeConfig = window.__RUNTIME_CONFIG__;
 
-  const apiUrl =
+  const rawApiUrl =
     runtimeConfig?.apiUrl ||
     import.meta.env.VITE_API_URL ||
     "http://localhost:3000";
+
+  // Ensure apiUrl always ends with a trailing slash
+  const apiUrl = rawApiUrl.endsWith("/") ? rawApiUrl : `${rawApiUrl}/`;
 
   const eventsHttpDomain =
     runtimeConfig?.eventsHttpDomain ||
