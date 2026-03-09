@@ -1,19 +1,20 @@
 import { withDurableExecution, DurableContext, RetryDecision } from '@aws/durable-execution-sdk-js';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { RekognitionClient, DetectLabelsCommand } from '@aws-sdk/client-rekognition';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import {
-  BedrockAgentRuntimeClient,
-  InvokeAgentCommand,
-} from '@aws-sdk/client-bedrock-agent-runtime';
+  BedrockRuntimeClient,
+  ConverseCommand,
+} from '@aws-sdk/client-bedrock-runtime';
 import type { DynamoDBStreamEvent } from 'aws-lambda';
 
 const ddb = new DynamoDBClient({});
 const rekognition = new RekognitionClient({});
-const bedrockAgent = new BedrockAgentRuntimeClient();
+const s3 = new S3Client({});
+const bedrockRuntime = new BedrockRuntimeClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
 const BUCKET_NAME = process.env.BUCKET_NAME!;
-const AGENT_ID = process.env.BEDROCK_AGENT_ID!;
-const AGENT_ALIAS_ID = process.env.BEDROCK_AGENT_ALIAS_ID!;
+const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'eu.amazon.nova-pro-v1:0';
 
 // Labels from Rekognition that map to runway hazard types
 const HAZARD_LABELS: Record<string, string> = {
@@ -39,36 +40,13 @@ const HAZARD_LABELS: Record<string, string> = {
 };
 
 /**
- * Retry strategy: allow one retry (2 total attempts) with a 2-second delay.
+ * Retry strategy: allow one retry (2 total attempts) with a 5-second delay.
  */
 const retryOnce = (_error: Error, attemptCount: number): RetryDecision => ({
   shouldRetry: attemptCount < 2,
   delay: { seconds: 5 },
 });
 
-/**
- * Invoke the Bedrock Agent. The agent will use its action group
- * to fetch the camera image from S3 for visual inspection.
- */
-async function invokeHazardAgent(prompt: string, sessionId: string): Promise<string> {
-  const response = await bedrockAgent.send(new InvokeAgentCommand({
-    agentId: AGENT_ID,
-    agentAliasId: AGENT_ALIAS_ID,
-    sessionId,
-    inputText: prompt,
-    enableTrace: true,
-  }));
-
-  let result = '';
-  if (response.completion) {
-    for await (const chunk of response.completion) {
-      if (chunk.chunk?.bytes) {
-        result += new TextDecoder().decode(chunk.chunk.bytes);
-      }
-    }
-  }
-  return result;
-}
 
 /**
  * Durable function: multi-step hazard analysis workflow.
@@ -78,7 +56,7 @@ async function invokeHazardAgent(prompt: string, sessionId: string): Promise<str
  *
  * Steps:
  *  1. Classify the hazard type using Amazon Rekognition
- *  2. Invoke Bedrock Agent to assess severity and describe the hazard
+ *  2. Call Nova Pro directly via Converse API with the actual image bytes
  *  3. Write an alert record to DynamoDB
  *
  * Each step is checkpointed — if the Lambda is interrupted,
@@ -129,37 +107,81 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
     let { hazardType, labels } = rekognitionResult;
     context.logger.info('Hazard classified', { cameraId, hazardType });
 
-    // Step 2 — invoke Bedrock Agent with the image for visual assessment + severity
+    // Step 2 — call Nova Pro directly via Converse API with the actual image bytes
     const assessment = await context.step(`assess-severity-${cameraId}`, async () => {
+      // Fetch the image from S3 so we can pass it directly to the model
+      const s3Response = await s3.send(new GetObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: imageKey,
+      }));
+      const imageBytes = await s3Response.Body?.transformToByteArray();
+      if (!imageBytes) {
+        throw new Error(`Failed to read image from S3: ${imageKey}`);
+      }
+
+      const ext = imageKey.split('.').pop()?.toLowerCase() ?? 'jpeg';
+      const mediaType = ext === 'png' ? 'png' : 'jpeg';
+
       const prompt =
-        `Analyse this runway hazard detected by ${cameraId}.\n` +
-        // `Rekognition hazard type: ${hazardType}\n` +
-        // `Rekognition labels: ${JSON.stringify(labels)}\n` +
-        // `Detected at: ${detectedAt}\n` +
-        `Image location — bucket: "${BUCKET_NAME}", key: "${imageKey}". ` +
-        `You should use fetchs3 tool to get image metadata and the presigned URL. Use the presigned URL to fetch the image\n` +
+        `Analyse this runway camera image from ${cameraId}.\n` +
+        `Rekognition hazard type: ${hazardType}\n` +
+        `Rekognition labels: ${JSON.stringify(labels)}\n` +
+        `Detected at: ${detectedAt}\n` +
         `You should assess the image independently of the labels, and determine if it is a real hazard.\n` +
-        `In particular, assess for any birds and drones/UAVs in the picture and look out for any debris or mechanical parts (e.g. wheels) on the runway\n` +
-        `Please check if an identified "airplane" is actually a UAV\n` + 
-        `Wheels anywhere near the runway should be considered a high severity hazard\n` +
+        `In particular, assess for any birds and drones/UAVs in the picture and look out for any debris or mechanical parts (e.g. wheels) on the runway.\n` +
+        `Please check if an identified "airplane" is actually a UAV.\n` +
+        `Wheels anywhere near the runway should be considered a high severity hazard.\n` +
         `If you cannot determine a severity, respond with severity "info" and a description of the image content.\n` +
-        `For the purposes of image recognition, UAVs should be considered to be drones and should be a critical hazard\n` + 
-        `If the rekognition hazard type is "vehicle", you should assess to see if there is actually an drone/UAV in the picture. If so, that should take precedence as the hazard\n` +
+        `For the purposes of image recognition, UAVs should be considered to be drones and should be a critical hazard.\n` +
+        `If the rekognition hazard type is "vehicle", you should assess to see if there is actually a drone/UAV in the picture. If so, that should take precedence as the hazard.\n` +
         `Respond with JSON only: {"severity":"critical|high|info|none","hazard":"bird|drone|vehicle|debris|unknown|none","description":"<one sentence description>"}`;
 
-      context.logger.info('Invoking Bedrock Agent', {
-        agentId: AGENT_ID,
-        aliasId: AGENT_ALIAS_ID,
-        sessionId,
-        promptLength: prompt.length,
+      context.logger.info('Invoking Nova Pro via Converse API', {
+        modelId: MODEL_ID,
+        imageSizeBytes: imageBytes.length,
+        mediaType,
       });
 
       let raw: string;
       try {
-        raw = await invokeHazardAgent(prompt, sessionId);
+        const response = await bedrockRuntime.send(new ConverseCommand({
+          modelId: MODEL_ID,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  image: {
+                    format: mediaType,
+                    source: { bytes: imageBytes },
+                  },
+                },
+                { text: prompt },
+              ],
+            },
+          ],
+          system: [
+            {
+              text:
+                'You are an airport runway safety expert. Analyse the provided camera image for hazards. ' +
+                'Severity guidelines: ' +
+                '"critical": drones, unauthorized vehicles, or persons on the runway — immediate danger to aircraft operations. ' +
+                '"high": debris, foreign objects, birds, or large animals — significant risk requiring prompt action. ' +
+                '"info": no clear hazard but noteworthy observation. ' +
+                '"none": clear runway with no hazards. ' +
+                'Respond ONLY with valid JSON.',
+            },
+          ],
+          inferenceConfig: {
+            maxTokens: 256,
+            temperature: 0.1,
+          },
+        }));
+
+        raw = response.output?.message?.content?.[0]?.text ?? '';
       } catch (err: unknown) {
         const error = err as Error & { $metadata?: unknown; Code?: string; name?: string };
-        context.logger.error('Bedrock Agent invocation failed', {
+        context.logger.error('Converse API invocation failed', {
           errorName: error.name,
           errorMessage: error.message,
           errorCode: error.Code,
@@ -169,7 +191,7 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
         throw error;
       }
 
-      context.logger.info('Bedrock Agent raw response', { raw: raw.substring(0, 500) });
+      context.logger.info('Nova Pro raw response', { raw: raw.substring(0, 500) });
 
       try {
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -182,15 +204,16 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
           };
         }
       } catch {
-        context.logger.warn('Failed to parse agent response, using fallback', { raw });
+        context.logger.warn('Failed to parse model response, using fallback', { raw });
       }
 
-      // Fallback if agent response can't be parsed
+      // Fallback if model response can't be parsed
       const fallbackSeverity: Record<string, string> = {
         bird: 'high', debris: 'high', drone: 'critical', vehicle: 'critical',
       };
       return {
         severity: fallbackSeverity[hazardType] ?? 'none',
+        hazard: hazardType,
         description: `${hazardType} detected on ${cameraId}`,
       };
     }, { retryStrategy: retryOnce });
