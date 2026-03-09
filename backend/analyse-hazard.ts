@@ -130,6 +130,7 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
         `You should assess the image independently of the labels, and determine if it is a real hazard.\n` +
         `In particular, assess for any birds and drones/UAVs in the picture and look out for any debris or mechanical parts (e.g. wheels) on the runway.\n` +
         `Please check if an identified "airplane" is actually a UAV.\n` +
+        `If an actual airplane is on the runway, this does not constitute a hazard.\n` +
         `Wheels anywhere near the runway should be considered a high severity hazard.\n` +
         `If you cannot determine a severity, respond with severity "info" and a description of the image content.\n` +
         `For the purposes of image recognition, UAVs should be considered to be drones and should be a critical hazard.\n` +
@@ -167,8 +168,8 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
                 'Severity guidelines: ' +
                 '"critical": drones, unauthorized vehicles, or persons on the runway — immediate danger to aircraft operations. ' +
                 '"high": debris, foreign objects, birds, or large animals — significant risk requiring prompt action. ' +
-                '"info": no clear hazard but noteworthy observation. ' +
-                '"none": clear runway with no hazards. ' +
+                '"info": no clear hazard but noteworthy observation ' +
+                '"none": clear runway with no hazards or just traditional aircraft. ' +
                 'Respond ONLY with valid JSON.',
             },
           ],
