@@ -32,6 +32,7 @@ const HAZARD_LABELS: Record<string, string> = {
   'Van': 'vehicle',
   'Automobile': 'vehicle',
   'Debris': 'debris',
+  'Wheel': 'debris',
   'Litter': 'debris',
   'Trash': 'debris',
   'Person': 'vehicle',
@@ -132,15 +133,17 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
     const assessment = await context.step(`assess-severity-${cameraId}`, async () => {
       const prompt =
         `Analyse this runway hazard detected by ${cameraId}.\n` +
-        `Rekognition hazard type: ${hazardType}\n` +
-        `Rekognition labels: ${JSON.stringify(labels)}\n` +
-        `Detected at: ${detectedAt}\n` +
+        // `Rekognition hazard type: ${hazardType}\n` +
+        // `Rekognition labels: ${JSON.stringify(labels)}\n` +
+        // `Detected at: ${detectedAt}\n` +
         `Image location — bucket: "${BUCKET_NAME}", key: "${imageKey}". ` +
         `You should use fetchs3 tool to get image metadata and the presigned URL. Use the presigned URL to fetch the image\n` +
         `You should assess the image independently of the labels, and determine if it is a real hazard.\n` +
-        `In particular, look out for birds, drones in the picture and look out for any debris or mechanical parts (e.g. wheels) on the runway\n` + 
+        `In particular, assess for any birds and drones/UAVs in the picture and look out for any debris or mechanical parts (e.g. wheels) on the runway\n` +
+        `Please check if an identified "airplane" is actually a UAV\n` + 
+        `Wheels anywhere near the runway should be considered a high severity hazard\n` +
         `If you cannot determine a severity, respond with severity "info" and a description of the image content.\n` +
-        `For the purposes of image recognition, UAVs should be considered as drones\n` + 
+        `For the purposes of image recognition, UAVs should be considered to be drones and should be a critical hazard\n` + 
         `If the rekognition hazard type is "vehicle", you should assess to see if there is actually an drone/UAV in the picture. If so, that should take precedence as the hazard\n` +
         `Respond with JSON only: {"severity":"critical|high|info|none","hazard":"bird|drone|vehicle|debris|unknown|none","description":"<one sentence description>"}`;
 
@@ -194,8 +197,15 @@ export const handler = withDurableExecution(async (event: DynamoDBStreamEvent, c
 
     context.logger.info('Severity assessed', { cameraId, severity: assessment.severity, hazard: assessment.hazard, description: assessment.description });
 
+    // If there is no assessment, don't send an alert
     if (hazardType === 'none' && assessment.hazard == 'none') {
       context.logger.info('No hazard detected, skipping alert', { cameraId });
+      continue;
+    }
+
+    // If the Bedrock assessment of severity is "info" or "none", then don't send an alert
+    if (assessment.severity === 'info' || assessment.severity === 'none') {
+      context.logger.info('Assessment severity is info/none, skipping alert', { cameraId });
       continue;
     }
 

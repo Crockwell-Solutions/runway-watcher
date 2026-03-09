@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "frontend": "npm run dev -w frontend",
-    "build:backend": "node_modules/.bin/esbuild --bundle backend/*.ts --outdir=dist/ --sourcemap=inline --platform=node && cp -r resources/camera-images dist/files",
+    "build:backend": "node_modules/.bin/esbuild --bundle backend/*.ts --outdir=dist/ --sourcemap=inline --platform=node && cp -r resources/camera-images/* dist/files",
     "build:frontend": "npm run build -w frontend",
     "build:infra": "npm run build -w infrastructure",
     "lint": "npm run lint -w frontend",

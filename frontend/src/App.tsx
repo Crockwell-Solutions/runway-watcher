@@ -23,6 +23,7 @@ interface Alert {
   hazardType?: string
   detectedAt?: string
   processingTime?: number
+  acknowledged?: boolean
 }
 
 interface CameraFeed {
@@ -96,6 +97,8 @@ interface CameraAlert {
   detectedAt?: string
   processedAt?: string
   processingTime?: number
+  acknowledged?: boolean
+  acknowledgedAt?: string
 }
 
 // ── Hook to fetch camera alerts from the API ──
@@ -113,13 +116,29 @@ function useCameraAlerts() {
     }
   }, [])
 
+  const acknowledgeAlert = React.useCallback(async (alertId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${config.apiUrl}cameras/alerts/acknowledge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alertId }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await fetchAlerts()
+      return true
+    } catch (err) {
+      console.error('Failed to acknowledge alert', err)
+      return false
+    }
+  }, [fetchAlerts])
+
   React.useEffect(() => {
     fetchAlerts()
     const interval = setInterval(fetchAlerts, 60_000)
     return () => clearInterval(interval)
   }, [fetchAlerts])
 
-  return { cameraAlerts, refreshAlerts: fetchAlerts }
+  return { cameraAlerts, refreshAlerts: fetchAlerts, acknowledgeAlert }
 }
 
 // ── WebSocket subscription hook for AppSync Events ──
@@ -242,16 +261,16 @@ const alertTypeIcons: Record<string, string> = {
 }
 
 function getAlertLevel(cameraAlerts: CameraAlert[], cameraId: string): 'normal' | 'warning' | 'alert' {
-  const camAlerts = cameraAlerts.filter(a => a.cameraId === cameraId)
+  const camAlerts = cameraAlerts.filter(a => a.cameraId === cameraId && !a.acknowledged)
   if (camAlerts.some(a => a.severity === 'critical')) return 'alert'
   if (camAlerts.some(a => a.severity === 'high')) return 'warning'
   return 'normal'
 }
 
 function getAlertDetails(cameraAlerts: CameraAlert[], cameraId: string): CameraAlert | undefined {
-  // Return the highest-priority alert for this camera
-  return cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'critical')
-    ?? cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'high')
+  // Return the highest-priority unacknowledged alert for this camera
+  return cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'critical' && !a.acknowledged)
+    ?? cameraAlerts.find(a => a.cameraId === cameraId && a.severity === 'high' && !a.acknowledged)
 }
 
 function CameraMapMarker({ cameraId, position, cameraAlerts, onSelect }: {
@@ -346,6 +365,7 @@ function toDisplayAlert(ca: CameraAlert): Alert {
     hazardType: ca.hazardType,
     detectedAt: ca.detectedAt,
     processingTime: ca.processingTime,
+    acknowledged: ca.acknowledged ?? false,
   }
 }
 
@@ -475,48 +495,74 @@ function Sidebar({ page, onNavigate, onSimulateHazard, onInitiateFeeds, avgProce
   )
 }
 
-function AlertCard({ alert }: { alert: Alert }) {
+function AlertCard({ alert, onAcknowledge }: { alert: Alert; onAcknowledge?: (id: string) => void }) {
+  const [acking, setAcking] = React.useState(false)
   const colors = severityColors[alert.severity]
+  const isAcked = alert.acknowledged
+
   return (
-    <div className={`p-4 rounded-xl ${colors.bg} ${colors.border} border flex flex-col gap-3`}>
+    <div className={`p-4 rounded-xl ${isAcked ? 'bg-slate-800/20 border-slate-700/40' : colors.bg} ${isAcked ? 'border-slate-700/40' : colors.border} border flex flex-col gap-3 ${isAcked ? 'opacity-50' : ''} transition-opacity`}>
       <div className="flex justify-between items-start">
         <div className="flex flex-col gap-1">
-          <span className={`text-[10px] font-bold ${colors.text} uppercase tracking-widest`}>{alert.label}</span>
-          <h3 className="text-sm font-bold text-slate-100">{alert.title}</h3>
+          <span className={`text-[10px] font-bold ${isAcked ? 'text-slate-500' : colors.text} uppercase tracking-widest`}>
+            {isAcked ? 'ACKNOWLEDGED' : alert.label}
+          </span>
+          <h3 className={`text-sm font-bold ${isAcked ? 'text-slate-400' : 'text-slate-100'}`}>{alert.title}</h3>
         </div>
         {alert.hazardType && (
-          <div className={`${colors.scoreBg} px-2 py-1 rounded`}>
-            <span className={`text-xs font-bold ${colors.text} uppercase`}>{alert.hazardType}</span>
+          <div className={`${isAcked ? 'bg-slate-700/50' : colors.scoreBg} px-2 py-1 rounded`}>
+            <span className={`text-xs font-bold ${isAcked ? 'text-slate-500' : colors.text} uppercase`}>{alert.hazardType}</span>
           </div>
         )}
       </div>
 
       {alert.imageUrl && (
-        <div className="aspect-video w-full rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900">
+        <div className={`aspect-video w-full rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900 ${isAcked ? 'grayscale' : ''}`}>
           <img src={alert.imageUrl} alt={alert.title} className="w-full h-full object-cover" />
         </div>
       )}
 
       {alert.description && (
-        <p className="text-xs text-slate-400 leading-normal">{alert.description}</p>
+        <p className={`text-xs ${isAcked ? 'text-slate-500' : 'text-slate-400'} leading-normal`}>{alert.description}</p>
       )}
 
       <div className="flex items-center justify-between text-[10px] text-slate-500">
         {alert.detectedAt && <span>{new Date(alert.detectedAt).toLocaleTimeString()} · {formatAge(alert.detectedAt)}</span>}
         {alert.processingTime != null && <span>Processed in {(alert.processingTime / 1000).toFixed(1)}s</span>}
       </div>
+
+      {!isAcked && onAcknowledge && (
+        <button
+          onClick={() => {
+            setAcking(true)
+            onAcknowledge(alert.id)
+          }}
+          disabled={acking}
+          className={`w-full py-1.5 rounded-lg text-xs font-bold transition-colors ${
+            acking
+              ? 'bg-slate-700 text-slate-400 cursor-wait'
+              : 'bg-slate-700/50 text-slate-300 hover:bg-slate-600/50 hover:text-white'
+          }`}
+        >
+          {acking ? 'ACKNOWLEDGING…' : 'ACKNOWLEDGE'}
+        </button>
+      )}
     </div>
   )
 }
 
-function RightSidebar({ cameraAlerts, isOpen, onToggle }: { cameraAlerts: CameraAlert[]; isOpen: boolean; onToggle: () => void }) {
+function RightSidebar({ cameraAlerts, isOpen, onToggle, onAcknowledge }: { cameraAlerts: CameraAlert[]; isOpen: boolean; onToggle: () => void; onAcknowledge: (alertId: string) => void }) {
   const displayAlerts = cameraAlerts
     .filter(a => a.severity === 'critical' || a.severity === 'high' || a.severity === 'info')
     .map(toDisplayAlert)
-    .sort((a, b) => new Date(b.detectedAt ?? 0).getTime() - new Date(a.detectedAt ?? 0).getTime())
+    .sort((a, b) => {
+      // Unacknowledged first, then by time
+      if (a.acknowledged !== b.acknowledged) return a.acknowledged ? 1 : -1
+      return new Date(b.detectedAt ?? 0).getTime() - new Date(a.detectedAt ?? 0).getTime()
+    })
 
-  const alertCount = displayAlerts.length
-  const hasCritical = displayAlerts.some(a => a.severity === 'critical')
+  const alertCount = displayAlerts.filter(a => !a.acknowledged).length
+  const hasCritical = displayAlerts.some(a => a.severity === 'critical' && !a.acknowledged)
 
   if (!isOpen) {
     return (
@@ -563,7 +609,7 @@ function RightSidebar({ cameraAlerts, isOpen, onToggle }: { cameraAlerts: Camera
           <p className="text-xs text-slate-500 text-center py-8">No active alerts</p>
         ) : (
           displayAlerts.map((alert) => (
-            <AlertCard key={alert.id} alert={alert} />
+            <AlertCard key={alert.id} alert={alert} onAcknowledge={onAcknowledge} />
           ))
         )}
       </div>
@@ -911,7 +957,7 @@ function App() {
   const [alertsOpen, setAlertsOpen] = React.useState(true)
   const [selectedCamera, setSelectedCamera] = React.useState<CameraFeed | null>(null)
   const { cameras, loading, refresh } = useCameraFeeds()
-  const { cameraAlerts, refreshAlerts } = useCameraAlerts()
+  const { cameraAlerts, refreshAlerts, acknowledgeAlert } = useCameraAlerts()
 
   // Subscribe to AppSync Events — refresh both alerts and camera feeds on any event
   const handleWebSocketMessage = React.useCallback(() => {
@@ -988,7 +1034,7 @@ function App() {
         <CamerasPage cameraFeeds={cameras} loading={loading} onRefresh={refresh} onSelectCamera={setSelectedCamera} />
       )}
 
-      <RightSidebar cameraAlerts={cameraAlerts} isOpen={alertsOpen} onToggle={() => setAlertsOpen(prev => !prev)} />
+      <RightSidebar cameraAlerts={cameraAlerts} isOpen={alertsOpen} onToggle={() => setAlertsOpen(prev => !prev)} onAcknowledge={acknowledgeAlert} />
 
       <CameraOverlay camera={selectedCamera} onClose={() => setSelectedCamera(null)} />
     </div>

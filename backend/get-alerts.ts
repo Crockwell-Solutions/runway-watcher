@@ -45,6 +45,8 @@ export const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayP
           detectedAt: item.DetectedAt?.S,
           processedAt: item.ProcessedAt?.S,
           processingTime: item.ProcessingTime?.N ? Number(item.ProcessingTime.N) : undefined,
+          acknowledged: item.Acknowledged?.BOOL ?? false,
+          acknowledgedAt: item.AcknowledgedAt?.S,
         };
       })
     );

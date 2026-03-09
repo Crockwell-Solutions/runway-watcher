@@ -50,9 +50,9 @@ runway-watcher/
 │
 ├── resources/
 │   └── camera-images/         # Sample camera images bundled with upload-images Lambda
-│       ├── camera-1-normal.jpg
-│       ├── camera-2-normal.jpg
-│       └── camera-3-normal.jpg
+│       ├── camera-1-normal.jpeg
+│       ├── camera-2-normal.jpeg
+│       └── camera-3-normal.jpeg
 │
 ├── .kiro/
 │   └── steering/              # AI assistant steering rules

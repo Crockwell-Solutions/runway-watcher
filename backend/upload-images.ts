@@ -19,14 +19,14 @@ interface CameraImageConfig {
 }
 
 const CAMERA_IMAGE_CONFIG: CameraImageConfig[] = [
-  { sourceFile: 'camera-1-normal.jpg', cameraId: 'camera-1', uploadChancePercent: 7, type: 'normal' },
-  { sourceFile: 'camera-1-aircraft.jpg', cameraId: 'camera-1', uploadChancePercent: 3, type: 'normal' },
-  { sourceFile: 'camera-1-birds.jpg', cameraId: 'camera-1', uploadChancePercent: 1, type: 'hazard' },
-  { sourceFile: 'camera-1-vehicle.jpg', cameraId: 'camera-1', uploadChancePercent: 1, type: 'hazard' },
-  { sourceFile: 'camera-2-normal.jpg', cameraId: 'camera-2', uploadChancePercent: 10, type: 'normal' },
-  { sourceFile: 'camera-2-drone.jpg', cameraId: 'camera-2', uploadChancePercent: 1, type: 'hazard' },
-  { sourceFile: 'camera-3-normal.jpg', cameraId: 'camera-3', uploadChancePercent: 10, type: 'normal' },
-  { sourceFile: 'camera-3-debris.jpg', cameraId: 'camera-3', uploadChancePercent: 1, type: 'hazard' },
+  { sourceFile: 'camera-1-normal.jpeg', cameraId: 'camera-1', uploadChancePercent: 7, type: 'normal' },
+  { sourceFile: 'camera-1-aircraft.jpeg', cameraId: 'camera-1', uploadChancePercent: 3, type: 'normal' },
+  { sourceFile: 'camera-1-birds.jpeg', cameraId: 'camera-1', uploadChancePercent: 1, type: 'hazard' },
+  { sourceFile: 'camera-1-vehicle.jpeg', cameraId: 'camera-1', uploadChancePercent: 1, type: 'hazard' },
+  { sourceFile: 'camera-2-normal.jpeg', cameraId: 'camera-2', uploadChancePercent: 10, type: 'normal' },
+  { sourceFile: 'camera-2-drone-large.jpeg', cameraId: 'camera-2', uploadChancePercent: 2, type: 'hazard' },
+  { sourceFile: 'camera-3-normal.jpeg', cameraId: 'camera-3', uploadChancePercent: 10, type: 'normal' },
+  { sourceFile: 'camera-3-debris-large.jpeg', cameraId: 'camera-3', uploadChancePercent: 2, type: 'hazard' },
 ];
 
 interface UploadEvent {
@@ -69,7 +69,7 @@ export const handler = async (event?: UploadEvent): Promise<void | ApiResponse> 
     const hazardConfigs = CAMERA_IMAGE_CONFIG.filter(c => c.type === 'hazard');
     const selected = hazardConfigs[Math.floor(Math.random() * hazardConfigs.length)];
 
-    const key = `${selected.cameraId}/${yyyy}/${mm}/${dd}/${selected.cameraId}-${timestamp}.jpg`;
+    const key = `${selected.cameraId}/${yyyy}/${mm}/${dd}/${selected.cameraId}-${timestamp}.jpeg`;
     const filePath = path.join(imagesDir, selected.sourceFile);
     const body = fs.readFileSync(filePath);
 
@@ -94,7 +94,7 @@ export const handler = async (event?: UploadEvent): Promise<void | ApiResponse> 
       if (config.type !== 'normal' || seen.has(config.cameraId)) continue;
       seen.add(config.cameraId);
 
-      const key = `${config.cameraId}/${yyyy}/${mm}/${dd}/${config.cameraId}-${timestamp}.jpg`;
+      const key = `${config.cameraId}/${yyyy}/${mm}/${dd}/${config.cameraId}-${timestamp}.jpeg`;
       const filePath = path.join(imagesDir, config.sourceFile);
       const body = fs.readFileSync(filePath);
 
@@ -146,7 +146,7 @@ export const handler = async (event?: UploadEvent): Promise<void | ApiResponse> 
       }
     }
 
-    const key = `${cameraId}/${yyyy}/${mm}/${dd}/${cameraId}-${timestamp}.jpg`;
+    const key = `${cameraId}/${yyyy}/${mm}/${dd}/${cameraId}-${timestamp}.jpeg`;
     const filePath = path.join(imagesDir, selected.sourceFile);
     const body = fs.readFileSync(filePath);
 

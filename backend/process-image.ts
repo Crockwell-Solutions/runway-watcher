@@ -18,7 +18,7 @@ interface EventBridgeS3Event {
 
 export const handler = async (event: EventBridgeS3Event): Promise<void> => {
   const key = event.detail.object.key;
-  // Extract camera ID from key prefix: camera-x/yyyy/mm/dd/camera-x-timestamp.jpg
+  // Extract camera ID from key prefix: camera-x/yyyy/mm/dd/camera-x-timestamp.jpeg
   const cameraId = key.split('/')[0];
   const sortKey = cameraId.toUpperCase().replace('-', '');
 
