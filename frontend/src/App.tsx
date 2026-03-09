@@ -257,9 +257,9 @@ function useWebSocket({ url, apiKey, httpDomain, onMessage, enabled }: {
 
 // ── Camera positions on the map (2400x1200 canvas) ──
 const cameraPositions: Record<string, { top: number; left: number; label: string; directionDeg: number }> = {
-  CAMERA1: { top: 900, left: 400, label: 'CAM 1 — RUNWAY SOUTH', directionDeg: 45 },
-  CAMERA2: { top: 600, left: 100, label: 'CAM 2 — PERIMETER WEST', directionDeg: 90 },
-  CAMERA3: { top: 1000, left: 1800, label: 'CAM 3 — PERIMETER EAST', directionDeg: -22.5 },
+  CAMERA1: { top: 1100, left: 800, label: 'CAM 1 — RUNWAY SOUTH', directionDeg: 0 },
+  CAMERA2: { top: 1000, left: 100, label: 'CAM 2 — PERIMETER WEST', directionDeg: 45 },
+  CAMERA3: { top: 400, left: 1900, label: 'CAM 3 — PERIMETER EAST', directionDeg: -82.5 },
 }
 
 // ── Alert type to icon mapping (Material Symbols) ──
@@ -969,7 +969,7 @@ function MapViewport({ cameraAlerts, cameraFeeds, onSelectCamera }: { cameraAler
           }}
         >
           <img
-            src="/airport-apron.png"
+            src="/airport.png"
             alt="Airport apron"
             className="absolute inset-0 w-full h-full object-cover opacity-50 grayscale contrast-125"
             draggable={false}

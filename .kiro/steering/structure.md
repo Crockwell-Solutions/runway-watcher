@@ -5,7 +5,7 @@ runway-watcher/
 ├── frontend/                  # React SPA (Vite + TypeScript)
 │   ├── public/
 │   │   ├── config.js          # Runtime config (replaced at deploy)
-│   │   ├── airport-apron.png  # Map background image
+│   │   ├── airport.png        # Map background image
 │   │   └── favicon.ico
 │   ├── src/
 │   │   ├── App.tsx            # Main application component (all views, hooks, map, cameras)
