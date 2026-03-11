@@ -47,6 +47,8 @@ export const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayP
           processingTime: item.ProcessingTime?.N ? Number(item.ProcessingTime.N) : undefined,
           acknowledged: item.Acknowledged?.BOOL ?? false,
           acknowledgedAt: item.AcknowledgedAt?.S,
+          cleared: item.Cleared?.BOOL ?? false,
+          clearedAt: item.ClearedAt?.S,
           boundingBoxes: item.BoundingBoxes?.S ? JSON.parse(item.BoundingBoxes.S) : [],
         };
       })

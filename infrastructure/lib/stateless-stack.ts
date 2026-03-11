@@ -116,8 +116,9 @@ export class RunwayWatcherStatelessStack extends Stack {
       },
     });
 
-    // Grant the Lambda write access to the DynamoDB table
-    props.runwayWatcherTable.grantWriteData(processImageLambda.lambda);
+    // Grant the Lambda read/write access to the DynamoDB table
+    // (writes LATEST records, reads+deletes ALERT records to clear alerts on new images)
+    props.runwayWatcherTable.grantReadWriteData(processImageLambda.lambda);
 
     // Use EventBridge to trigger the Lambda when objects are created in the camera images bucket.
     // This avoids the cross-stack circular dependency that S3 event notifications would create.

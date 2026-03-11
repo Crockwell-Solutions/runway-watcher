@@ -108,6 +108,8 @@ interface CameraAlert {
   processingTime?: number
   acknowledged?: boolean
   acknowledgedAt?: string
+  cleared?: boolean
+  clearedAt?: string
   boundingBoxes?: BoundingBox[]
 }
 
@@ -277,7 +279,7 @@ function normalizeCameraId(id: string): string {
 
 function getAlertLevel(cameraAlerts: CameraAlert[], cameraId: string): 'normal' | 'warning' | 'alert' {
   const norm = normalizeCameraId(cameraId)
-  const camAlerts = cameraAlerts.filter(a => normalizeCameraId(a.cameraId ?? '') === norm && !a.acknowledged)
+  const camAlerts = cameraAlerts.filter(a => normalizeCameraId(a.cameraId ?? '') === norm && !a.acknowledged && !a.cleared)
   if (camAlerts.some(a => a.severity === 'critical')) return 'alert'
   if (camAlerts.some(a => a.severity === 'high')) return 'warning'
   return 'normal'
@@ -286,8 +288,8 @@ function getAlertLevel(cameraAlerts: CameraAlert[], cameraId: string): 'normal' 
 function getAlertDetails(cameraAlerts: CameraAlert[], cameraId: string): CameraAlert | undefined {
   const norm = normalizeCameraId(cameraId)
   // Return the highest-priority unacknowledged alert for this camera
-  return cameraAlerts.find(a => normalizeCameraId(a.cameraId ?? '') === norm && a.severity === 'critical' && !a.acknowledged)
-    ?? cameraAlerts.find(a => normalizeCameraId(a.cameraId ?? '') === norm && a.severity === 'high' && !a.acknowledged)
+  return cameraAlerts.find(a => normalizeCameraId(a.cameraId ?? '') === norm && a.severity === 'critical' && !a.acknowledged && !a.cleared)
+    ?? cameraAlerts.find(a => normalizeCameraId(a.cameraId ?? '') === norm && a.severity === 'high' && !a.acknowledged && !a.cleared)
 }
 
 function CameraMapMarker({ cameraId, position, cameraAlerts, onSelect }: {
